@@ -1,0 +1,21 @@
+## sample input ##
+sample_type: "ffpe"
+sample: "P2-2"
+input_path: "<DATA_ROOT>/public_data/prostate_cancer_research_histology/spaceranger/spaceranger_P2-2/outs"
+threads: 8
+
+tools: ["copykat", "copyvae", "scevan", "tuscan"]
+run_combos: ["allspots_no_ref"]
+
+display:
+  allspots_no_ref: "AllSpots_no-ref"
+
+## output path ##
+outroot: "<DATA_ROOT>/realdata/datasets/prostate_eva_ffpe/run_CNV"
+
+## ref path ##
+copyvae_gene_map_csv: "<REF_ROOT>/hg38_gene_map.csv"
+copyvae_cell_cycle_file: "<TOOLS_ROOT>/copyVAE/data/Macosko_cell_cycle_genes.txt"
+copyvae:
+  cell_cycle_file: "<TOOLS_ROOT>/copyVAE/data/Macosko_cell_cycle_genes.txt"
+  gene_map_csv: "<REF_ROOT>/hg38_gene_map.csv"

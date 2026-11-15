@@ -1,0 +1,36 @@
+name: stcnv-r-shared
+channels:
+  - conda-forge
+  - bioconda
+  - defaults
+dependencies:
+  - r-base=4.4.*
+  - r-seurat=5.1.*
+  - r-biocmanager
+  - r-remotes
+  - r-optparse
+  - r-tidyverse
+  - r-data.table
+  - r-matrix=1.7.*          
+  - r-igraph
+  - r-arrow
+  - r-dplyr
+  - r-readr
+  - r-stringr
+  - bioconductor-infercnv
+  - libstdcxx-ng>=12
+  - libgcc-ng>=12
+  - libgfortran-ng>=12
+  - libopenblas
+  - r-rcurl               # 让 remotes/devtools 不用自己编译 RCurl
+  - r-ape
+  - r-tidytree            # ggtree 依赖
+  - bioconductor-treeio   # ggtree 依赖（Bioc）
+  - bioconductor-fgsea
+  - bioconductor-ggtree
+  - r-hdf5r        # ← 新增
+  - r-pdist
+
+  # 如果仍崩，再加这两行显式 pin 到 openblas：
+  # - libblas=*=*openblas
+  # - libcblas=*=*openblas

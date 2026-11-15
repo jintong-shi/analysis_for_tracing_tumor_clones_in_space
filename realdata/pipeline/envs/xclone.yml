@@ -1,0 +1,38 @@
+name: xclone
+channels:
+  - conda-forge
+  - bioconda
+  - defaults
+dependencies:
+  # Python 基座
+  - python=3.9
+  - pip
+  - setuptools
+  - wheel
+
+  # 科学计算与 I/O 依赖（XClone/xcltk 常用）
+  - numpy
+  - scipy
+  - pandas
+  - scikit-learn
+  - anndata>=0.8
+  - scanpy>=1.9
+  - h5py
+  - pytables              # 支持 .h5/.h5ad I/O
+  - numba
+  - cython
+  - matplotlib
+  - seaborn
+  - pysam                 # 读写 BAM/CRAM 常用
+  - tqdm
+  - sortedcontainers      # required by intervaltree -> xcltk import chain
+  - cellsnp-lite
+  - samtools
+  - tabix
+  # 可选：若你在这个 env 里也想用 samtools/bcftools（不是必须）
+  # - samtools
+  # - bcftools
+
+  - pip:
+      - xclone==0.4.0     # pin to the cached working CLI-compatible version
+      - xcltk==0.5.2      # provides the xcltk executable used by Snakefile

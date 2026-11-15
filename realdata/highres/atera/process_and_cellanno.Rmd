@@ -1,0 +1,377 @@
+---
+title: "Xenium_data_process"
+author: "jintong"
+date: "2026-04-15"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+library(Seurat)
+library(sf)
+library(ggplot2)
+library(future)
+setwd('<DATA_ROOT>/high_res_ST/atera/processed_data/clustering')
+source('../../../figures/utils/color.R')
+#plan("multisession", workers = 10)
+#options(future.globals.maxSize = 30 * 1024^3)
+```
+
+## Load Xenium Object
+
+```{r load_obj}
+xenium.obj <- LoadXenium("<DATA_ROOT>/high_res_ST/atera/data/WTA_Preview_FFPE_Breast_Cancer/outs",
+                          fov = "fov", segmentations="cell", flip.xy=TRUE)
+xenium.obj
+```
+
+```{r}
+metadata <- xenium.obj@meta.data
+head(metadata, n=3)
+# BlankCodeword: background noise
+# ControlCodeword: 
+# ControlProbe: negative control probe -> detect false postive 
+```
+
+## plot spatial plots
+
+### plot nCounts spatial plot
+
+```{r}
+# You can change "repr.plot.width" below to change plot width
+# You can change "repr.plot.height" below to change plot height
+options(repr.plot.width=10, repr.plot.height=16)
+
+# max.cutoff="q95" - Color is capped at 95th percentile
+ImageFeaturePlot(xenium.obj, fov = "fov",
+                 features = c("nCount_Xenium"),
+                 max.cutoff="q95")+
+  scale_y_reverse()
+```
+
+### plot a specific gene
+
+```{r}
+options(repr.plot.width=5, repr.plot.height=7)
+ImageFeaturePlot(xenium.obj, features = "ERBB2",
+                 max.cutoff ="q95", cols=c("black","white"))+
+  scale_y_reverse()
+
+options(repr.plot.width=5, repr.plot.height=7)
+ImageFeaturePlot(xenium.obj, features = "IL7R",
+                 max.cutoff ="q95", cols=c("black","white"))+
+  scale_y_reverse()
+```
+
+## downstream analysis
+### Data preprocessing
+#### QC
+
+```{r}
+hist(xenium.obj$nCount_Xenium, breaks = 100)
+#abline(v = 100, col="red")
+```
+
+```{r}
+hist(xenium.obj$nCount_Xenium,xlim=c(0,1000), breaks = 1000)
+abline(v = 100, col="red")
+```
+
+#### filtering cells based on detected transcripts per cell
+#### Upper limit cutoff - 98th percentile
+#### Lower limit cutoff - 100 determined by the previous plot
+
+```{r}
+thres <- quantile(xenium.obj$nCount_Xenium, c(0.98))
+xenium.obj <- subset(xenium.obj, subset = nCount_Xenium >= 100 & nCount_Xenium <= thres[1])
+```
+
+```{r}
+## Normalization
+## library size based normalization, scale factor - median transcript count
+xenium.obj <- NormalizeData(xenium.obj, scale.factor=median(xenium.obj$nCount_Xenium))
+```
+```{r}
+## Find top 2k variable genes
+xenium.obj <- FindVariableFeatures(xenium.obj)
+## data scaling
+xenium.obj <- ScaleData(xenium.obj)
+## PCA for dimensionality reduction
+xenium.obj <- RunPCA(xenium.obj, verbose = FALSE)
+## 2D projection by UMAP
+xenium.obj <- RunUMAP(xenium.obj, dims = 1:30, verbose = FALSE)
+```
+
+```{r}
+## clustering
+xenium.obj <- FindNeighbors(xenium.obj, dims = 1:30)
+xenium.obj <- FindClusters(xenium.obj, resolution = 0.1)
+```
+```{r}
+for (i in seq(0.1,1,0.1)) {
+  xenium.obj <- FindClusters(xenium.obj, resolution = i)
+}
+
+```
+#### clustering
+```{r}
+## plot clustering results in UMAP
+options(repr.plot.width=8, repr.plot.height=8)
+lapply(seq(0.1,1,0.1), function(i){
+  p <- DimPlot(xenium.obj,group.by = paste0('Xenium_snn_res.',i),cols = c(.cluster_cols,my36colors))
+  return(p)
+})->plist
+pdf('diff_resolution_umap_plots.pdf')
+print(plist)
+dev.off()
+```
+```{r}
+options(repr.plot.width=10, repr.plot.height=14)
+resolutions <- seq(0.1, 1, 0.1)
+
+for (i in resolutions) {
+  p <- ImageDimPlot(
+    xenium.obj,
+    group.by = paste0("Xenium_snn_res.", i),
+    cols = c(.cluster_cols, my36colors)
+  ) + 
+    scale_y_reverse()
+
+  ggsave(
+    filename = paste0("imgplot_res_", i, ".png"),
+    plot = p,
+    width = 10,
+    height = 14,
+    units = "in",
+    dpi = 300
+  )
+}
+```
+```{r}
+clustering_res <- xenium.obj@meta.data[,13:23]
+write.table(clustering_res, "seurat_clustering_results.csv",
+              col.names=TRUE, row.names=FALSE, quote=FALSE, sep=",")
+# NOTE: xenium_obj.rds.gz is saved AFTER the cell-type annotation block below,
+# so the object carries major_celltype/minor_celltype (prep_atera_xenium_cells.R
+# requires major_celltype). See the save at the end of the annotation chunk.
+
+```
+```{r}
+for (i in seq(0.1,1,0.1)) {
+  all.markers <- FindAllMarkers(xenium.obj, only.pos = TRUE,group.by = paste0("Xenium_snn_res.", i),
+                              min.pct = 0.05, logfc.threshold = 1)
+  
+}
+
+```
+### Top markers check
+```{r}
+library(dplyr)
+
+markers_0.1 <- read.csv("FindAllMarkers_res_0.1.csv")
+
+colnames(markers_0.1)
+head(markers_0.1)
+
+fc_col <- 'avg_log2FC'
+
+top_n <- 10
+
+top_markers_0.1 <- markers_0.1 %>%
+  group_by(cluster) %>%
+  arrange(desc(.data[[fc_col]]), .by_group = TRUE) %>%
+  slice_head(n = top_n) %>%
+  ungroup()
+
+top_genes_0.1 <- unique(top_markers_0.1$gene)
+
+print(top_markers_0.1)
+print(top_genes_0.1)
+
+p <- DotPlot(
+  xenium.obj,
+  features = top_genes_0.1,
+  group.by = "Xenium_snn_res.0.1"
+) +
+  RotatedAxis() +
+  ggtitle("Top markers per cluster (res = 0.1)") +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    plot.title = element_text(hjust = 0.5)
+  )
+
+print(p)
+ggsave(
+  filename = "DotPlot_top_markers_res_0.1.pdf",
+  plot = p,
+  width = 20,
+  height = 8
+)
+
+```
+### cell annotations
+```{r}
+major_map <- c(
+  "0"  = "epi",
+  "1"  = "stroma",
+  "2"  = "imm",
+  "3"  = "epi",
+  "4"  = "stroma",
+  "5"  = "epi",
+  "6"  = "epi",
+  "7"  = "imm",
+  "8"  = "imm",
+  "9"  = "stroma",
+  "10" = "epi"
+)
+
+# ---------- minor cell type ----------
+minor_map <- c(
+  "0"  = "Luminal_tumor_cells",
+  "1"  = "CAFs",
+  "2"  = "T_cells",
+  "3"  = "Luminal_progenitor_like_cells",
+  "4"  = "vascular_endothelial_cells",
+  "5"  = "Basal_like_tumor_cells",
+  "6"  = "Myoepithelial_like_cells",
+  "7"  = "Plasma_cells",
+  "8"  = "Mast_cells",
+  "9"  = "Lymphatic_endothelial_cells",
+  "10" = "Secretory_Apocrine_luminal_cells"
+)
+
+# 写入 metadata
+xenium.obj$major_celltype <- unname(major_map[as.character(xenium.obj$Xenium_snn_res.0.1)])
+xenium.obj$minor_celltype <- unname(minor_map[as.character(xenium.obj$Xenium_snn_res.0.1)])
+
+# 设定顺序，保证画图时顺序稳定
+xenium.obj$major_celltype <- factor(
+  xenium.obj$major_celltype,
+  levels = c("epi", "imm", "stroma")
+)
+
+xenium.obj$minor_celltype <- factor(
+  xenium.obj$minor_celltype,
+  levels = c(
+    "Luminal_tumor_cells",
+    "Luminal_progenitor_like_cells",
+    "Basal_like_tumor_cells",
+    "Myoepithelial_like_cells",
+    "Secretory_Apocrine_luminal_cells",
+    "T_cells",
+    "Plasma_cells",
+    "Mast_cells",
+    "CAFs",
+    "vascular_endothelial_cells",
+    "Lymphatic_endothelial_cells"
+  )
+)
+
+table(xenium.obj$Xenium_snn_res.0.1, xenium.obj$major_celltype)
+table(xenium.obj$Xenium_snn_res.0.1, xenium.obj$minor_celltype)
+
+# Save the annotated object (moved here from above so it carries
+# major_celltype/minor_celltype). prep_atera_xenium_cells.R reads it from the
+# clustering/ dir (= the setwd target at the top of this notebook).
+saveRDS(xenium.obj,
+        '<DATA_ROOT>/high_res_ST/atera/processed_data/clustering/xenium_obj.rds.gz',
+        compress = 'gzip')
+
+major_markers <- c(
+  # epi
+  "EPCAM", "KRT8", "KRT18", "KRT19", "MUC1", "PIP", "SCGB2A2", "KRT17", "TP63",
+  # imm
+  "CD3D", "CD3E", "TRAC", "JCHAIN", "MZB1", "CPA3", "KIT", "MS4A2",
+  # stroma
+  "COL1A1", "COL1A2", "LUM", "THBS2", "VWF", "KDR", "PECAM1", "PROX1", "LYVE1", "CCL21"
+)
+
+p_major <- DotPlot(
+  xenium.obj,
+  features = major_markers,
+  group.by = "major_celltype"
+) +
+  RotatedAxis() +
+  ggtitle("Major cell type markers") +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    plot.title = element_text(hjust = 0.5)
+  )
+
+print(p_major)
+
+ggsave(
+  "DotPlot_major_category_markers.pdf",
+  plot = p_major,
+  width = 12,
+  height = 6
+)
+
+```
+### select epi 
+```{r}
+epi_markers <- c("EPCAM", "KRT8", "KRT18", "KRT19", "MUC1", "PIP", "SCGB2A2", "KRT17", "TP63")
+
+p_epi <- DotPlot(
+  xenium.obj,
+  features = epi_markers,
+  group.by = "major_celltype"
+) +
+  RotatedAxis() +
+  ggtitle("epithelial markers") +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    plot.title = element_text(hjust = 0.5)
+  )
+
+print(p_epi)
+
+p_group_img = ImageDimPlot(xenium.obj, group.by = "major_celltype")
+ggsave(
+    filename =  "major_cell_type_img_plot.png",
+    plot = p_group_img,
+    width = 10,
+    height = 14,
+    units = "in",
+    dpi = 300,
+    bg = "white"
+  )
+```
+```{r}
+xenium.epi = subset(xenium.obj,major_celltype=='epi')
+saveRDS(xenium.epi,'xenium_epi.rds.gz',compress='gzip')
+```
+### function
+## Select sub-region of interest
+
+### Select sub-region by coordinates
+
+```{r}
+min_x = 1000
+min_y = 1000
+max_x = 2000
+max_y = 2000
+
+options(future.globals.maxSize = 1e10)
+crop <- Crop(xenium.obj[["fov"]],
+             x = c(min_x, max_x),
+             y = c(min_y, max_y))
+```
+
+### Select sub-region by cell-ids
+
+```{r}
+# read csv
+select_cells <- read.csv("./one-sample-analysis/Selection_1_cells_stats.csv", skip = 2, header = TRUE)
+head(select_cells, n=3)
+xenium.obj.sub <- subset(xenium.obj, cells = select_cells$Cell.ID)
+xenium.obj.sub
+```
+
+```{r}
+options(repr.plot.width=8, repr.plot.height=8)
+ImageFeaturePlot(xenium.obj.sub, fov = "fov",
+                 features = c("nCount_Xenium"),
+                 cols = c("black","white"),
+                 max.cutoff="q95")+
+  scale_y_reverse()
+```

@@ -1,0 +1,32 @@
+## sample input ##
+sample_type: "ffpe"
+sample: "HT486B1-S1H1Fs1U1Bp1"
+input_path: "<DATA_ROOT>/realdata_mappingWES/public_data/standard_spaceranger/HT486B1-S1H1Fs1U1Bp1/outs"
+decon_csv: "<DATA_ROOT>/realdata_mappingWES/deconv/HT486B1-S1H1Fs1U1Bp1_metadata.csv"
+threads: 8
+
+tools: ["infercnv"]
+run_combos: ["decon_stromaimm_ref"]
+
+decon:
+  epi_celltypes: "Tumor_prop"
+  stroma_celltypes: "Endothelial_prop,Fibroblast_prop,Pericyte_prop"
+  imm_celltypes: "Macrophage_prop,Mast_prop,T_prop"
+
+cell2location:
+  run: False
+
+params:
+  epi_threshold: 0.5
+  ref_top_frac: 0.10
+
+display:
+  decon_stromaimm_ref: "Decon_StromaImm-ref"
+
+## output path ##
+outroot: "<DATA_ROOT>/realdata/datasets/Ding_nature_wes/run_links"
+
+## ref path ##
+infercnv:
+  gene_pos_file: "<REF_ROOT>/gencode_v38_gene_pos.txt"
+  HMM: true

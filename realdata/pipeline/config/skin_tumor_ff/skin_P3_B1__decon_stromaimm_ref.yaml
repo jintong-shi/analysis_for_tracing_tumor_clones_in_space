@@ -1,0 +1,44 @@
+## sample input ##
+sample_type: "freshfrozen"
+sample: "skin_P3_B1"
+input_path: "<DATA_ROOT>/public_data/skin_tumor/visium_from_kim/Patient3/V10F24-014_B1"
+decon_csv: "<DATA_ROOT>/realdata/datasets/skin_tumor_ff/run_CNV/skin_P3_B1/cell2location/Decon_proportion.csv"
+threads: 8
+
+tools: ["conicsmat", "copykat", "copyvae", "infercnv", "infercnvpy", "scevan", "starch", "tuscan"]
+run_combos: ["decon_stromaimm_ref"]
+
+decon:
+  epi_celltypes: "Keratinocyte"
+  stroma_celltypes: "Endothelial Cell,Fibroblast"
+  imm_celltypes: "Tcell,B Cell,NK,Mac,LC,CD1C,CLEC9A,MDSC,ASDC,PDC"
+
+cell2location:
+  run: False
+  sc_ref_folder: "<DATA_ROOT>/public_data/skin_tumor/scRNA_GEO/cell2location_ref/P3"
+
+params:
+  epi_threshold: 0.5
+  ref_top_frac: 0.10
+
+display:
+  decon_stromaimm_ref: "Decon_StromaImm-ref"
+
+## output path ##
+outroot: "<DATA_ROOT>/realdata/datasets/skin_tumor_ff/run_CNV"
+
+## ref path ##
+infercnv:
+  gene_pos_file: "<REF_ROOT>/gencode_v38_gene_pos.txt"
+  HMM: false
+conicsmat:
+  chrom_arm_file: "<TOOLS_ROOT>/CONICSmat/chromosome_arm_positions_grch38.txt"
+copyvae_gene_map_csv: "<REF_ROOT>/hg38_gene_map.csv"
+copyvae_cell_cycle_file: "<TOOLS_ROOT>/copyVAE/data/Macosko_cell_cycle_genes.txt"
+copyvae:
+  cell_cycle_file: "<TOOLS_ROOT>/copyVAE/data/Macosko_cell_cycle_genes.txt"
+  gene_map_csv: "<REF_ROOT>/hg38_gene_map.csv"
+starch:
+  n_clusters: 3
+  output_name: STARCH
+  repo_dir: "<TOOLS_ROOT>"

@@ -1,0 +1,20 @@
+## sample input ##
+sample_type: "ffpe"
+sample: "HT397B1-H2U1"
+input_path: "<DATA_ROOT>/realdata_mappingWES/public_data/standard_spaceranger/HT397B1-S1H2Fs4U1Bp1/outs"
+threads: 8
+
+tools: ["starch", "tuscan"]
+run_combos: ["allspots_no_ref"]
+
+display:
+  allspots_no_ref: "AllSpots_no-ref"
+
+## output path ##
+outroot: "<DATA_ROOT>/realdata/datasets/Ding_nature_wes/run_links"
+
+## ref path ##
+starch:
+  n_clusters: 3
+  output_name: STARCH
+  repo_dir: "<TOOLS_ROOT>"

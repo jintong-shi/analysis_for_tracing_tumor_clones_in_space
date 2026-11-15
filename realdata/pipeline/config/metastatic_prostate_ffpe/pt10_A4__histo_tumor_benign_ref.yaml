@@ -1,0 +1,36 @@
+## sample input ##
+sample_type: "ffpe"
+sample: "pt10_A4"
+input_path: "<DATA_ROOT>/Prostate_Oxford/orig_data/pt10_A4"
+histology_csv: "<DATA_ROOT>/realdata/datasets/metastatic_prostate_ffpe/truth_links/histology/pt10_A4_three_categories.csv"
+threads: 8
+
+tools: ["conicsmat", "copykat", "copyvae", "infercnv", "infercnvpy", "scevan", "starch", "tuscan"]
+run_combos: ["histo_tumor_benign_ref"]
+
+histology:
+  tumor_labels: ["Tumor"]
+  benign_labels: ["Normal"]
+  epi_labels: ["Normal", "Tumor"]
+
+display:
+  histo_tumor_benign_ref: "HistoTumor_Benign-ref"
+
+## output path ##
+outroot: "<DATA_ROOT>/realdata/datasets/metastatic_prostate_ffpe/run_links"
+
+## ref path ##
+infercnv:
+  gene_pos_file: "<REF_ROOT>/gencode_v38_gene_pos.txt"
+  HMM: false
+conicsmat:
+  chrom_arm_file: "<TOOLS_ROOT>/CONICSmat/chromosome_arm_positions_grch38.txt"
+copyvae_gene_map_csv: "<REF_ROOT>/hg38_gene_map.csv"
+copyvae_cell_cycle_file: "<TOOLS_ROOT>/copyVAE/data/Macosko_cell_cycle_genes.txt"
+copyvae:
+  cell_cycle_file: "<TOOLS_ROOT>/copyVAE/data/Macosko_cell_cycle_genes.txt"
+  gene_map_csv: "<REF_ROOT>/hg38_gene_map.csv"
+starch:
+  n_clusters: 3
+  output_name: STARCH
+  repo_dir: "<TOOLS_ROOT>"

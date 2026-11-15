@@ -1,0 +1,31 @@
+name: cell2location
+channels:
+  - conda-forge
+  - defaults
+dependencies:
+  # Match versions from the working /envs/cell2loc_env
+  - python=3.10
+  - pip=24.3
+
+  # Core scientific stack
+  - numpy=1.26.4
+  - scipy=1.14.1
+  - pandas=2.2.3
+  - matplotlib=3.9.3
+  - seaborn=0.13.2
+
+  # Spatial stack (pin scanpy/anndata with pandas compatibility)
+  - anndata=0.11.1
+  - scanpy=1.10.4
+  - leidenalg=0.10.2
+  - python-igraph=0.11.8
+
+  - pip:
+    # Keep torch from pip only (avoid conda+pip torch conflicts)
+    - torch==2.5.1
+    - cell2location==0.1.4
+    - scvi-tools==1.2.0
+    - pyro-ppl==1.9.1
+    - opencv-python==4.10.0.84
+    - jax==0.4.35
+    - jaxlib==0.4.35

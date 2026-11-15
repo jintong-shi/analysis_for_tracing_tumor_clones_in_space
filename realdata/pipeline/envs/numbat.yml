@@ -1,0 +1,35 @@
+name: numbat-env
+channels:
+  - conda-forge
+  - bioconda
+dependencies:
+  - r-base=4.4.*
+  - r-remotes
+  - r-data.table
+  - r-igraph
+  - r-tidygraph
+  - r-ape
+  - r-phangorn
+  - bioconductor-iranges
+  - bioconductor-genomicranges
+  - bioconductor-treeio
+  - bioconductor-ggtree
+  - r-essentials
+  - cellsnp-lite=1.2.3
+  - samtools=1.22
+  - bcftools
+  - wget
+  - unzip
+  - pigz
+  - r-caTools
+  - r-roptim
+  - r-dendextend
+  - r-ggraph
+  - r-hahmmr
+  - r-logger
+  - r-optparse
+  - r-R.utils
+  - r-vcfR
+  - r-roptim
+  - r-Seurat
+  - r-hdf5r

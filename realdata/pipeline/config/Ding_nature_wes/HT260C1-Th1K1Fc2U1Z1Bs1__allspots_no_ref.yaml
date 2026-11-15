@@ -1,0 +1,20 @@
+## sample input ##
+sample_type: "freshfrozen"
+sample: "HT260C1-Th1K1Fc2U1Z1Bs1"
+input_path: "<DATA_ROOT>/realdata/datasets/Ding_nature_wes_ff_nobam/source_links/visium_root/HT260C1-Th1K1Fc2U1Z1Bs1/outs"
+threads: 8
+
+tools: ["starch", "tuscan"]
+run_combos: ["allspots_no_ref"]
+
+display:
+  allspots_no_ref: "AllSpots_no-ref"
+
+## output path ##
+outroot: "<DATA_ROOT>/realdata/datasets/Ding_nature_wes/run_links"
+
+## ref path ##
+starch:
+  n_clusters: 3
+  output_name: STARCH
+  repo_dir: "<TOOLS_ROOT>"

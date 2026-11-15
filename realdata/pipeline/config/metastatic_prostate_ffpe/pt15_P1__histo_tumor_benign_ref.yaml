@@ -1,0 +1,25 @@
+## sample input ##
+sample_type: "ffpe"
+sample: "pt15_P1"
+input_path: "<DATA_ROOT>/Prostate_Oxford/orig_data/pt15_P1"
+histology_csv: "<DATA_ROOT>/realdata/datasets/metastatic_prostate_ffpe/truth_links/histology/pt15_P1_three_categories.csv"
+threads: 8
+
+tools: ["infercnv", "scevan"]
+run_combos: ["histo_tumor_benign_ref"]
+
+histology:
+  tumor_labels: ["Tumor"]
+  benign_labels: ["Normal"]
+  epi_labels: ["Normal", "Tumor"]
+
+display:
+  histo_tumor_benign_ref: "HistoTumor_Benign-ref"
+
+## output path ##
+outroot: "<DATA_ROOT>/realdata/datasets/metastatic_prostate_ffpe/run_links"
+
+## ref path ##
+infercnv:
+  gene_pos_file: "<REF_ROOT>/gencode_v38_gene_pos.txt"
+  HMM: false

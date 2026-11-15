@@ -1,0 +1,41 @@
+## sample input ##
+sample_type: "freshfrozen"
+sample: "H1_4"
+input_path: "<DATA_ROOT>/realdata/datasets/nature_prostate_ff/truth_links/per_sample/H1_4/spaceranger_out/outs"
+decon_csv: "<DATA_ROOT>/realdata/datasets/nature_prostate_ff/run_links/H1_4/cell2location/Decon_proportion.csv"
+threads: 8
+
+tools: ["numbat"]
+run_combos: ["decon_stromaimm_ref"]
+
+decon:
+  epi_celltypes: "Epithelial"
+  stroma_celltypes: "CAFs,Endothelial,PNS_glial,SMCs"
+  imm_celltypes: "B-cells,Myeloid,Plasmablasts,T-cells"
+
+cell2location:
+  run: False
+  sc_ref_folder: "<DATA_ROOT>/public_data/prostate_sc_ref/"
+
+params:
+  epi_threshold: 0.5
+  ref_top_frac: 0.10
+
+display:
+  decon_stromaimm_ref: "Decon_StromaImm-ref"
+
+## output path ##
+outroot: "<DATA_ROOT>/realdata/datasets/nature_prostate_ff/run_links"
+
+## ref path ##
+numbat:
+  bam_path: "<COLLAB_DATA>/projects/oxford_prostate/spatial_VDJ/V13Y08-128_A/output_data/V13Y08-128_A1/outs/possorted_genome_bam.bam"
+  gmap_file: "<TOOLS_ROOT>/Eagle_v2.4.1/tables/genetic_map_hg38_withX.txt.gz"
+  eagle_bin: "<TOOLS_ROOT>/Eagle_v2.4.1/eagle"
+  snp_vcf: "<REF_ROOT>/numbat/genome1K.phase3.SNP_AF5e2.chr1toX.hg38.vcf"
+  panel_dir: "<REF_ROOT>/numbat/1000G_hg38"
+  UMI_tag: UB
+  cell_tag: CB
+  max_entropy: 0.8
+  min_LLR: 5
+  plot: true

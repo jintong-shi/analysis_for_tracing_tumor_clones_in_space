@@ -1,0 +1,39 @@
+name: stcnv-r-tuscan
+channels:
+  - conda-forge
+  - bioconda
+  - defaults
+dependencies:
+  - r-base=4.3.3
+  - r-optparse
+  - r-seurat=4.4.0
+  - r-seuratobject=4.1.4
+  - r-sp
+  - r-dlm=1.1_6
+  - r-mixtools
+  - r-hdf5r
+  - r-igraph
+  - r-jsonlite
+  - r-dplyr
+  - r-ggplot2
+  - r-fnn
+  - r-magick
+  - r-readr
+  - bioconductor-consensusclusterplus
+  - bioconductor-complexheatmap
+  - r-gplots
+  - r-sitmo
+  - r-future
+  - r-future.apply
+  - r-rcpp
+  - r-remotes
+  - pip
+# 系统库
+  - hdf5
+  - zlib
+  - curl
+    # Python 侧（keras3 需要的 TF/Keras 后端）
+  - python=3.10
+  - pip
+  - tensorflow-cpu==2.16.*
+  - keras=3.3.*              # 与 TF 2.15 匹配

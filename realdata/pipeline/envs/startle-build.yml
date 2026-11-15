@@ -1,0 +1,8 @@
+name: startle-build
+channels: [conda-forge, defaults]
+dependencies:
+  - cmake
+  - make
+  - gcc_linux-64
+  - gxx_linux-64
+  - git

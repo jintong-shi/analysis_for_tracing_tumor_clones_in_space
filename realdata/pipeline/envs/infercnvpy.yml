@@ -1,0 +1,15 @@
+name: infercnvpy
+channels:
+  - conda-forge
+  - bioconda
+dependencies:
+  - python=3.10
+  - pip
+  - numpy
+  - pandas
+  - scanpy>=1.9
+  - anndata
+  - matplotlib
+  - pyarrow
+  - pip:
+      - infercnvpy>=0.5

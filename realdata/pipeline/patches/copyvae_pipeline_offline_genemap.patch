@@ -1,0 +1,208 @@
+diff --git a/copyvae/pipeline.py b/copyvae/pipeline.py
+index 0000000..0000000 100644
+--- a/copyvae/pipeline.py
++++ b/copyvae/pipeline.py
+@@ -1,12 +1,16 @@
+ import argparse
+ import numpy as np
+ import tensorflow as tf
+ import anndata
+ from tensorflow.keras.optimizers import Adam
+ from tqdm.keras import TqdmCallback
++import pandas as pd
+ 
+ from copyvae.preprocess import filter_and_normalize_data
+-from copyvae.binning import build_gene_map, bin_genes_from_anndata
++from copyvae.binning import build_gene_map, bin_genes_from_anndata, CHR_BASE_PAIRS
++
++# Optional override for using a precomputed local gene map CSV
++GENE_MAP_CSV = None
+ from copyvae.vae import CopyVAE
+ from copyvae.clustering import find_clones_kmeans, find_normal_cluster
+ from copyvae.segmentation import generate_clone_profile
+@@ -140,41 +144,57 @@ def split_data_by_cluster(copy_bin, pred_label, ncell_index):
+     return cluster_dict
+ 
+ 
+-def run_pipeline(umi_counts, cell_cycle_gene_list, bin_size, max_cp, intermediate_dim, latent_dim, batch_size, epochs, number_of_clones):
++def run_pipeline(umi_counts, cell_cycle_gene_list):
+     """ Main pipeline
+ 
+     Args:
+         umi_counts: umi file
+         cell_cycle_gene_list: cell cycle gene file
+-        bin_size: number of genes per bin
++    Params:
+         max_cp: maximum copy number
++        bin_size: number of genes per bin
+         intermediate_dim: number of intermediate dimensions for vae
+         latent_dim: number of latent dimensions for vae
+         batch_size: batch size for training
+         epochs = number of epochs training
+-        number_of_clones: number of clones
+     """
+ 
++    bin_size = 25
++    max_cp = 15
++    intermediate_dim = 128
++    latent_dim = 15 #20
++    batch_size = 128
++    epochs = 200 #400
++    number_of_clones = 2
++
+     # preprocess data
+     feature_names=['gene_ids','gene_symbol']
+     adata = filter_and_normalize_data(umi_counts,
+                                       cell_cycle_gene_list,
+                                       alternative_feature_names=feature_names)
+-    server_url = 'http://www.ensembl.org'
+-    attributes = ['external_gene_name',
+-                  'ensembl_gene_id',
+-                  'chromosome_name',
+-                  'start_position',
+-                  'end_position']
+-    gene_map = build_gene_map(server_url, attributes)
++    # Ensure unique variable (gene) names to avoid anndata reindexing errors
++    try:
++        adata.var_names_make_unique()
++    except Exception:
++        pass
++    if GENE_MAP_CSV is not None:
++        # Load local gene map CSV and normalize columns to copyVAE internal schema
++        gene_map = pd.read_csv(GENE_MAP_CSV)
++        rename_map = {
++            'external_gene_name': 'Gene name',
++            'ensembl_gene_id': 'Gene stable ID',
++            'chromosome_name': 'chr',
++            'start_position': 'Gene start (bp)',
++            'end_position': 'Gene end (bp)'
++        }
++        gene_map = gene_map.rename(columns={k: v for k, v in rename_map.items() if k in gene_map.columns})
++        required_cols = ['Gene name', 'chr', 'Gene start (bp)']
++        missing = [c for c in required_cols if c not in gene_map.columns]
++        if missing:
++            raise ValueError(f"Local gene map missing required columns: {missing}")
++        gene_map['chr'] = gene_map['chr'].astype(str).str.replace('chr', '', regex=False)
++        gene_map.loc[gene_map['chr'].isin(['X','x']), 'chr'] = '23'
++        gene_map = gene_map[gene_map['chr'].isin([str(i) for i in range(1,24)])].copy()
++        gene_map['chr'] = gene_map['chr'].astype(int)
++        gene_map = gene_map.sort_values(by=['chr', 'Gene start (bp)']).copy()
++        gene_map['abspos'] = gene_map['Gene start (bp)']
++        for i in range(len(CHR_BASE_PAIRS)):
++            gene_map.loc[gene_map['chr'] == i + 1, 'abspos'] += CHR_BASE_PAIRS[:i].sum()
++    else:
++        server_url = 'http://www.ensembl.org'
++        attributes = ['external_gene_name','ensembl_gene_id','chromosome_name','start_position','end_position']
++        gene_map = build_gene_map(server_url, attributes)
+ 
+     data, chrom_list = bin_genes_from_anndata(adata, bin_size, gene_map)
+     with open('chrom_list.npy', 'wb') as f:
+         np.save(f, chrom_list)
+@@ -196,6 +216,10 @@ def run_pipeline(umi_counts, cell_cycle_gene_list, bin_size, max_cp, intermediate_dim, latent_dim, batch_size, epochs, number_of_clones):
+ 
+     # find normal cells
+     cluster_auto_corr, ncell_index = find_normal_cluster(x_bin, pred_label)
++    # 保存到 CSV 文件
++    df = pd.DataFrame({"ncell_index": [ncell_index]})
++    df.to_csv("ncell_index.csv", index=False)
++    
+     norm_mask = (pred_label == ncell_index)
+     norm_x = compute_pseudo_copy(x_bin, norm_mask)
+ 
+@@ -218,25 +242,26 @@ def run_pipeline(umi_counts, cell_cycle_gene_list, bin_size, max_cp, intermediate_dim, latent_dim, batch_size, epochs, number_of_clones):
+     data.obsm['copy_number'] = copy_bin
+     #draw_umap(data, 'copy_number', '_copy_number')
+     #draw_heatmap(copy_bin,'bin_copies')
+-    with open('output/copy.npy', 'wb') as f:
++    with open('copy.npy', 'wb') as f:
+         np.save(f, copy_bin)
+ 
++    np.savetxt('pred_label.txt', pred_label, fmt='%d')
++
+     # seperate tumour cells from normal
+     cluster_dict = split_data_by_cluster(copy_bin, pred_label, ncell_index)
+     
+     # generate clone profile
+-    print('Segmentation')
++    print('Segmantation')
+     #chrom_list = np.load('chrom_list.npy')
+     for label, cluster_data in cluster_dict.items():
+         segment_cn, breakpoints, sc_cn = perform_segmentation(cluster_data, chrom_list, eta=6)
+-        filename = f"output/clone_{label}_single_cell_profile.npy"
++        filename = f"clone_{label}_single_cell_profile.npy"
+         with open(filename, 'wb') as f:
+             np.save(f, sc_cn)
+         final_prof = np.repeat(segment_cn, bin_size)
+-        filename = f"output/clone_{label}_profile.npy"
++        filename = f"clone_{label}_profile.npy"
+         with open(filename, 'wb') as f:
+             np.save(f, final_prof)
+-        filename = f"output/clone_{label}_breakpoints.npy"
++        filename = f"clone_{label}_breakpoints.npy"
+         with open(filename, 'wb') as f:
+             np.save(f, breakpoints)
+ 
+@@ -248,37 +273,18 @@ def run_pipeline(umi_counts, cell_cycle_gene_list, bin_size, max_cp, intermediate_dim, latent_dim, batch_size, epochs, number_of_clones):
+ if __name__ == "__main__":
+     parser = argparse.ArgumentParser()
+     parser.add_argument('input', help="input UMI")
+     parser.add_argument('cell_cycle_genes', help="path of list of cell cycle genes")
++    parser.add_argument('--gene_map_csv', default=None, help="Local gene map CSV with columns: external_gene_name, ensembl_gene_id, chromosome_name, start_position, end_position")
+ 
+     parser.add_argument('-g', '--gpu', type=int, help="GPU id")
+-    parser.add_argument('-bin', '--bin_size', type=int, help="bin size")
+-    parser.add_argument('-mc', '--max_cp', type=int, help="maximum copy number")
+-    parser.add_argument('-intd', '--intermediate_dim', type=int, help="intermediate dimension")
+-    parser.add_argument('-l', '--latent_dim', type=int, help="latent dim")
+-    parser.add_argument('-bs', '--batch_size', type=int, help="batch size")
+-    parser.add_argument('-ep', '--epochs', type=int, help="number of epochs")
+-    parser.add_argument('-nc', '--number_of_clones', type=int, help="number_of_clones")
+ 
+     args = parser.parse_args()
+     file = args.input
+     cc_genes = args.cell_cycle_genes
+     if not args.gpu:
+         dvc = '/CPU:0'
+     else:
+         dvc = '/device:GPU:0'
+ 
+-    if args.bin_size:
+-        bin_size = args.bin_size
+-    else:
+-        bin_size = 25
+-
+-    if args.max_cp:
+-        max_cp = args.max_cp
+-    else:
+-        max_cp = 15
+-
+-    if args.intermediate_dim:
+-        intermediate_dim = args.intermediate_dim
+-    else:
+-        intermediate_dim = 128
+-
+-    if args.latent_dim:
+-        latent_dim = args.latent_dim
+-    else:
+-        latent_dim = 15
+-
+-    if args.batch_size:
+-        batch_size = args.batch_size
+-    else:
+-        batch_size = 128
+-
+-    if args.epochs:
+-        epochs = args.epochs
+-    else:
+-        epochs = 200
+-
+-    if args.number_of_clones:
+-        number_of_clones = args.number_of_clones
+-    else:
+-        number_of_clones = 2
+-
+     with tf.device(dvc):
+-        run_pipeline(file, cc_genes, bin_size, max_cp, intermediate_dim, latent_dim, batch_size, epochs, number_of_clones)
++        global GENE_MAP_CSV
++        GENE_MAP_CSV = args.gene_map_csv
++        run_pipeline(file, cc_genes)

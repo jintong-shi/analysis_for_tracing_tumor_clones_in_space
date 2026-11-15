@@ -1,0 +1,58 @@
+## sample input ##
+sample_type: "freshfrozen"
+sample: "skin_P4_V1"
+input_path: "<DATA_ROOT>/public_data/skin_tumor/visium_from_kim/Patient4/V19T26-101_V1/spaceranger_rerun/outs"
+decon_csv: "<DATA_ROOT>/realdata/datasets/skin_tumor_ff/run_CNV/skin_P4_V1/cell2location/Decon_proportion.csv"
+threads: 8
+
+tools: ["calicost", "conicsmat", "copykat", "copyvae", "infercnv", "infercnvpy", "numbat", "scevan", "starch", "tuscan", "xclone"]
+run_combos: ["decon_stromaimm_ref"]
+
+decon:
+  epi_celltypes: "Keratinocyte"
+  stroma_celltypes: "Endothelial Cell,Fibroblast"
+  imm_celltypes: "Tcell,B Cell,NK,Mac,LC,CD1C,CLEC9A,MDSC,ASDC,PDC"
+
+cell2location:
+  run: False
+  sc_ref_folder: "<DATA_ROOT>/public_data/skin_tumor/scRNA_GEO/cell2location_ref/P4"
+
+params:
+  epi_threshold: 0.5
+  ref_top_frac: 0.10
+
+display:
+  decon_stromaimm_ref: "Decon_StromaImm-ref"
+
+## output path ##
+outroot: "<DATA_ROOT>/realdata/datasets/skin_tumor_ff/run_CNV"
+
+## ref path ##
+infercnv:
+  gene_pos_file: "<REF_ROOT>/gencode_v38_gene_pos.txt"
+  HMM: false
+conicsmat:
+  chrom_arm_file: "<TOOLS_ROOT>/CONICSmat/chromosome_arm_positions_grch38.txt"
+copyvae_gene_map_csv: "<REF_ROOT>/hg38_gene_map.csv"
+copyvae_cell_cycle_file: "<TOOLS_ROOT>/copyVAE/data/Macosko_cell_cycle_genes.txt"
+copyvae:
+  cell_cycle_file: "<TOOLS_ROOT>/copyVAE/data/Macosko_cell_cycle_genes.txt"
+  gene_map_csv: "<REF_ROOT>/hg38_gene_map.csv"
+starch:
+  n_clusters: 3
+  output_name: STARCH
+  repo_dir: "<TOOLS_ROOT>"
+numbat:
+  bam_path: "<DATA_ROOT>/public_data/skin_tumor/visium_from_kim/Patient4/V19T26-101_V1/spaceranger_rerun/outs/possorted_genome_bam.bam"
+  gmap_file: "<TOOLS_ROOT>/Eagle_v2.4.1/tables/genetic_map_hg38_withX.txt.gz"
+  eagle_bin: "<TOOLS_ROOT>/Eagle_v2.4.1/eagle"
+  snp_vcf: "<REF_ROOT>/numbat/genome1K.phase3.SNP_AF5e2.chr1toX.hg38.vcf"
+  panel_dir: "<REF_ROOT>/numbat/1000G_hg38"
+  UMI_tag: UB
+  cell_tag: CB
+  max_entropy: 0.8
+  min_LLR: 5
+  plot: true
+xclone:
+  gene_region: "<REF_ROOT>/xclone/annotate_genes_hg38_update_20230126.txt"
+  genome_mode: "hg38_genes"

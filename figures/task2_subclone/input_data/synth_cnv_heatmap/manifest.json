@@ -1,0 +1,43 @@
+{
+  "rep_name": "Rep_13_Clones_3_Shared_3",
+  "n_spots": 779,
+  "n_genes": 36548,
+  "panels": [
+    {
+      "name": "Ground truth",
+      "key": "gt",
+      "has_pred": false,
+      "present": true
+    },
+    {
+      "name": "InferCNV (HMM state)",
+      "key": "InferCNV_HMM17_TumorFreeNormal",
+      "has_pred": true,
+      "present": true
+    },
+    {
+      "name": "SCEVAN",
+      "key": "SCEVAN_TumorFreeNormal",
+      "has_pred": true,
+      "present": true
+    },
+    {
+      "name": "STARCH",
+      "key": "STARCH",
+      "has_pred": true,
+      "present": true
+    },
+    {
+      "name": "Numbat",
+      "key": "Numbat_TumorFreeNormal",
+      "has_pred": true,
+      "present": true
+    },
+    {
+      "name": "CalicoST",
+      "key": "CalicoST",
+      "has_pred": true,
+      "present": true
+    }
+  ]
+}

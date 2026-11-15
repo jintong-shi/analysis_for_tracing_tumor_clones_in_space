@@ -1,0 +1,19 @@
+## sample input ##
+sample_type: "ffpe"
+sample: "P11-1"
+input_path: "<DATA_ROOT>/public_data/prostate_cancer_research_histology/spaceranger/spaceranger_P11-1/outs"
+threads: 8
+
+tools: ["infercnv", "scevan"]
+run_combos: ["histo_tumor_benign_ref"]
+
+display:
+  histo_tumor_benign_ref: "HistoTumor_Benign-ref"
+
+## output path ##
+outroot: "<DATA_ROOT>/realdata/datasets/prostate_eva_ffpe/run_CNV"
+
+## ref path ##
+infercnv:
+  gene_pos_file: "<REF_ROOT>/gencode_v38_gene_pos.txt"
+  HMM: false

@@ -1,0 +1,37 @@
+# Subclone extraction — NovaSeq IDC_Grade3, ds90k benign-reference inferCNV run.
+# Same shape as atera_brca_analysis/code/altered_benign/config_subclone.yaml, but all
+# paths are ABSOLUTE so the app (which lives in the atera repo and resolves relative
+# paths against that repo root) reads and writes inside SpatialCNV_benchmark.
+#
+# The tree is built on all 90,000 cancer cells; the 476 benign reference cells are not
+# in the inferCNV observation set, so they never enter the tree.
+
+sample_id: novaseq_idc_grade3_ds90k
+mode:      subclone
+
+# --- inputs ---
+infercnv_obj:  <DATA_ROOT>/high_res_ST/novaseq/processed_data/infercnv_IDC_Grade3_ds90k/infcnv/run.final.infercnv_obj
+cells_file:    <DATA_ROOT>/high_res_ST/novaseq/processed_data/infercnv_IDC_Grade3_ds90k/app_inputs/cells.parquet
+histology_csv: <DATA_ROOT>/high_res_ST/novaseq/processed_data/infercnv_IDC_Grade3_ds90k/app_inputs/histology_annotation.csv
+infercnv_png:  <DATA_ROOT>/high_res_ST/novaseq/processed_data/infercnv_IDC_Grade3_ds90k/outputs/IDC_Grade3_ds90k_allcells_heatmap.png
+
+# --- outputs ---
+output_dir:      <DATA_ROOT>/high_res_ST/novaseq/processed_data/infercnv_IDC_Grade3_ds90k/app_outputs
+candidates_path: <DATA_ROOT>/high_res_ST/novaseq/processed_data/infercnv_IDC_Grade3_ds90k/app_outputs/subclones.csv
+
+params:
+  tree_roles:    [cancer]      # cluster the IDC cells to find subclones
+  pca_dims:      50
+  hclust_method: ward.D2       # matches inferCNV's default linkage
+  display_bins:  1200          # heatmap / strip rows; selection stays in full cell space
+  nav_k:         10
+  seed:          42
+
+  # annotation value -> role. histology here is the res-0.3 expression cluster.
+  histology_groups:
+    benign: [normal]
+    cancer: [idc_c0, idc_c1, idc_c2, idc_c5, idc_c6, idc_c9, idc_c10, idc_c11]
+
+heatmap:
+  cnv_lo: 0.85
+  cnv_hi: 1.15

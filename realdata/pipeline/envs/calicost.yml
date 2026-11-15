@@ -1,0 +1,26 @@
+name: calicost
+channels:
+  - conda-forge
+  - bioconda
+  - defaults
+dependencies:
+  - python=3.10
+  
+  # Pinning HTSlib first is crucial. 
+  # We add libdeflate explicitly to help the solver.
+  - libdeflate>=1.22
+  - htslib=1.22.1
+  
+  # Now add the main tool
+  - cellsnp-lite=1.2.3
+  
+  # Python dependencies for Step 2
+  - pandas
+  - scipy
+  - scikit-learn
+  - numpy
+  - statsmodels
+  - pyyaml
+  - pulp
+  - numexpr
+  - samtools

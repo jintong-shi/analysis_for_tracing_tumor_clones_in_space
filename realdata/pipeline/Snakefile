@@ -1,0 +1,1773 @@
+# =========================
+# ST-CNV pipeline Snakefile
+# =========================
+
+import os
+
+if not workflow.overwrite_configfiles:
+    raise WorkflowError("This Snakefile requires --configfile <sample yaml>; no default config is loaded.")
+
+CONFIG_FILE = workflow.overwrite_configfiles[-1]
+
+
+# ---- validation constants ----
+CONFIG_OK = ".snakemake/flags/config_validated.ok"
+# Tool-name validation is case-insensitive (config tools are normalized to lowercase).
+TOOLS_ALLOWED = {
+    "copykat", "scevan", "infercnv", "tuscan", "copyvae", "conicsmat",
+    "xclone", "numbat", "starch", "infercnvpy", "calicost",
+}
+COMBOS_ALLOWED = {
+    "histo_no_ref",
+    "decon_no_ref",
+    "decon_stromaimm_ref",
+    "allspots_no_ref",
+    "histo_pure_benign",
+    "histo_tumor_benign_ref",
+    "decon_auto_ref",
+}
+
+# --------- Config & helpers ----------
+SAMPLE   = config["sample"]
+VISIUM   = config["input_path"]
+HISTCSV  = config.get("histology_csv", "")
+DECONCSV = config.get("decon_csv", "")
+OUTROOT  = config["outroot"]
+COPYVAE_GENE_MAP = config.get("copyvae_gene_map_csv", "")
+SAMPLE_TYPE = str(config.get("sample_type", "ffpe")).strip().lower()
+IS_FFPE = (SAMPLE_TYPE == "ffpe")
+
+EPI_LABELS = config.get("epi_labels", "")
+BENIGN_LAB = config.get("benign_labels", "")
+
+EPI_THRES  = config.get("params", {}).get("epi_threshold", 0.5)
+REF_TOP_FR = config.get("params", {}).get("ref_top_frac", 0.10)
+
+DISP = config.get("display", {})
+# Built-in display name for newly-added combo (can be overridden in config.display).
+DEFAULT_DISP = {"histo_tumor_benign_ref": "HistoTumor_Benign-ref"}
+# 显示名 <-> 内部key 双向映射与规范化
+REV_DISP = {v: k for k, v in {**DEFAULT_DISP, **DISP}.items()}
+
+def canon_combo(c: str) -> str:
+    """把显示名转换回内部key（如果本来就是内部key则原样返回）"""
+    return REV_DISP.get(c, c)
+
+def labels_to_csv(v, default):
+    """Normalize labels from config into a comma-separated string."""
+    if isinstance(v, str):
+        vals = [x.strip() for x in v.split(",") if x.strip()]
+    elif isinstance(v, (list, tuple, set)):
+        vals = [str(x).strip() for x in v if str(x).strip()]
+    elif v is None:
+        vals = []
+    else:
+        vals = [str(v).strip()]
+    if not vals:
+        vals = [str(x).strip() for x in default if str(x).strip()]
+    return ",".join(vals)
+
+HISTO_CFG = config.get("histology", {})
+HISTO_TUMOR_LABELS = labels_to_csv(HISTO_CFG.get("tumor_labels", ["Tumor"]), ["Tumor"])
+HISTO_BENIGN_LABELS = labels_to_csv(HISTO_CFG.get("benign_labels", BENIGN_LAB), ["Normal"])
+
+def combo_needs_ref(combo: str) -> bool:
+    """统一用内部key判断是否需要ref"""
+    return canon_combo(combo) in COMBOS_WITH_REF
+# ---- Global ----
+GLOBAL_THREADS = int(config.get("threads", 8))
+GLOBAL_WINDOW_SIZE = int(config.get("windowsize", 101))
+
+# ---- Helper for Common References ----
+REFS = config.get("refs", {})
+
+def get_ref(key):
+    """Safely get a reference path from the 'refs' block"""
+    if key not in REFS:
+        raise ValueError(f"Missing required reference in config['refs']: {key}")
+    return REFS[key]
+BAM_FILE = os.path.join(VISIUM, "possorted_genome_bam.bam")
+if not os.path.exists(BAM_FILE):
+    print(f"WARNING: BAM file not found at {BAM_FILE}")
+
+    # ---- copyVAE config ----
+COPYVAE_CELL_CYCLE = config.get("copyvae_cell_cycle_file", "")
+
+# ---- infercnv config ----
+INFERCNV = config.get("infercnv", {})   # config.yaml: infercnv: { gene_pos_file: "..." }
+INFERCNV_GENE_POS = INFERCNV.get("gene_pos_file", "")  # 必填，否则不生成 infercnv 目标
+def infercnv_hmm_flag(wc):
+    """Read infercnv HMM switch from config and pass lowercase true/false to R script."""
+    cfg = config.get("infercnv", {})
+    # Support both HMM and hmm keys, default false when unset.
+    val = cfg["HMM"] if "HMM" in cfg else cfg.get("hmm", False)
+    if isinstance(val, bool):
+        return "true" if val else "false"
+
+    sval = str(val).strip().lower()
+    if sval in ("true", "false"):
+        return sval
+
+    raise ValueError("config.infercnv.HMM must be true or false")
+
+# ---- CONICSmat config ----
+CONICSMAT = config.get("conicsmat", {})
+CONICSMAT_ARMS = CONICSMAT.get("chrom_arm_file", "")
+CONICSMAT_GENE_POS = CONICSMAT.get("gene_pos_file", INFERCNV_GENE_POS)
+
+
+# ---- NUMBAT config ----
+NUMBAT = config.get("numbat", {})
+NUMBAT_BAM      = NUMBAT.get("bam_path", "")
+NUMBAT_GMAP     = NUMBAT.get("gmap_file", "")
+NUMBAT_EAGLE    = NUMBAT.get("eagle_bin", "")
+NUMBAT_SNPVCF   = NUMBAT.get("snp_vcf", "")
+NUMBAT_PANELDIR = NUMBAT.get("panel_dir", "")
+def numbat_root(sample, combo):
+    return f"{combo_root(sample, combo)}/NUMBAT"
+
+def numbat_outdir(sample, combo):
+    return numbat_root(sample, combo)
+
+def numbat_allele_counts(sample, combo):
+    return f"{numbat_root(sample, combo)}/{sample}_allele_counts.tsv.gz"
+
+def numbat_counts_dir(sample, combo):
+    return f"{numbat_root(sample, combo)}/counts_mtx"
+
+def numbat_ready_flag(sample, combo):
+    return f"{numbat_root(sample, combo)}/_PREPARED.txt"
+
+# ---- XClone config ----
+XCLONE = config.get("xclone", {})
+
+# ---- CalicoST config ----
+CALICOST = config.get("calicost", {})
+
+# paths to executables (REQUIRED)
+CALICOST_DIR   = CALICOST.get("calicost_dir", "")           # REQUIRED: git-cloned CalicoST dir
+CALICOST_EAGLE = CALICOST.get("eagledir", "")               # REQUIRED: Eagle2 dir
+
+# running parameters (with defaults)
+CALICOST_SAMTOOLS_SORT_MEM = CALICOST.get("samtools_sorting_mem", "4G")
+CALICOST_UMITAG            = CALICOST.get("UMItag", "Auto")
+CALICOST_CELLTAG           = CALICOST.get("cellTAG", "CB")
+CALICOST_NTHREADS_CELL     = int(CALICOST.get("nthreads_cellsnplite", 20))
+CALICOST_REGION_VCF        = CALICOST.get("region_vcf", "")          # REQUIRED: SNP panel VCF
+CALICOST_PHASING_PANEL     = CALICOST.get("phasing_panel", "")       # REQUIRED: 1000G panel dir
+CALICOST_CHROMOSOMES       = CALICOST.get("chromosomes", list(range(1, 23)))
+
+# input (REQUIRED; 若未指定则回退到全局 VISIUM)
+CALICOST_SPACERANGER_DIR   = CALICOST.get("spaceranger_dir", VISIUM) # REQUIRED: Spaceranger outs
+CALICOST_TEMPLATE = "templates/calicost_cna_template.yaml" # Adjust path as needed
+
+# helper: derive default resource paths from repo dir
+def _repo(*p):
+    return os.path.join(CALICOST_DIR, *p) if CALICOST_DIR else ""
+
+# supporting files & preprocessing (模板为必填；未显式给出则按 calicost_dir 推导)
+CALICOST_GENETICMAP_FILE   = CALICOST.get("geneticmap_file", _repo("GRCh38_resources", "genetic_map_GRCh38_merged.tab.gz"))
+CALICOST_HGTABLE_FILE      = CALICOST.get("hgtable_file",    _repo("GRCh38_resources", "hgTables_hg38_gencode.txt"))
+CALICOST_NORMALIDX_FILE    = CALICOST.get("normalidx_file",  None)
+CALICOST_TUMORPROP_FILE    = CALICOST.get("tumorprop_file",  None)
+CALICOST_SUPERVISION_FILE  = CALICOST.get("supervision_clone_file", None)
+CALICOST_FILTER_GENE_LIST  = CALICOST.get("filtergenelist_file", _repo("GRCh38_resources", "ig_gene_list.txt"))
+CALICOST_FILTER_REGION_BED = CALICOST.get("filterregion_file",    _repo("GRCh38_resources", "HLA_regions.bed"))
+CALICOST_SECONDARY_MIN_UMI = int(CALICOST.get("secondary_min_umi", 300))
+CALICOST_BAFONLY           = bool(CALICOST.get("bafonly", False))
+
+# phase switch probability
+CALICOST_NU             = float(CALICOST.get("nu", 1.0))
+CALICOST_LOGPHASE_SHIFT = float(CALICOST.get("logphase_shift", -2.0))
+CALICOST_NPART_PHASING  = int(CALICOST.get("npart_phasing", 3))
+
+# HMRF configurations
+CALICOST_N_CLONES              = int(CALICOST.get("n_clones", 3))
+CALICOST_N_CLONES_RDR          = int(CALICOST.get("n_clones_rdr", 2))
+CALICOST_MIN_SPOTS_PER_CLONE   = int(CALICOST.get("min_spots_per_clone", 100))
+CALICOST_MIN_AVGUMI_PER_CLONE  = int(CALICOST.get("min_avgumi_per_clone", 10))
+CALICOST_MAXSPOTS_POOLING      = int(CALICOST.get("maxspots_pooling", 7))
+CALICOST_TUMORPROP_THRESHOLD   = float(CALICOST.get("tumorprop_threshold", 0.5))
+CALICOST_MAX_ITER_OUTER        = int(CALICOST.get("max_iter_outer", 20))
+CALICOST_NODEPOTENTIAL         = CALICOST.get("nodepotential", "weighted_sum")
+CALICOST_INITIALIZATION_METHOD = CALICOST.get("initialization_method", "rectangle")
+CALICOST_NUM_INIT_START        = int(CALICOST.get("num_hmrf_initialization_start", 0))
+CALICOST_NUM_INIT_END          = int(CALICOST.get("num_hmrf_initialization_end", 1))
+CALICOST_SPATIAL_WEIGHT        = float(CALICOST.get("spatial_weight", 1.0))
+CALICOST_ADJ_METHOD            = CALICOST.get("construct_adjacency_method", "hexagon")
+CALICOST_ADJ_W                 = float(CALICOST.get("construct_adjacency_w", 1.0))
+
+# HMM configurations
+CALICOST_N_STATES         = int(CALICOST.get("n_states", 7))
+CALICOST_PARAMS           = CALICOST.get("params", "smp")
+CALICOST_T                = CALICOST.get("t", "1-1e-5")
+CALICOST_T_PHASING        = float(CALICOST.get("t_phaseing", 0.9999))
+CALICOST_FIX_NB_DISP      = bool(CALICOST.get("fix_NB_dispersion", False))
+CALICOST_SHARED_NB_DISP   = bool(CALICOST.get("shared_NB_dispersion", True))
+CALICOST_FIX_BB_DISP      = bool(CALICOST.get("fix_BB_dispersion", False))
+CALICOST_SHARED_BB_DISP   = bool(CALICOST.get("shared_BB_dispersion", True))
+CALICOST_MAX_ITER         = int(CALICOST.get("max_iter", 30))
+CALICOST_TOL              = float(CALICOST.get("tol", 0.0001))
+CALICOST_GMM_RANDOM_STATE = int(CALICOST.get("gmm_random_state", 0))
+CALICOST_NP_THRESHOLD     = float(CALICOST.get("np_threshold", 1.0))
+CALICOST_NP_EVENTMINLEN   = int(CALICOST.get("np_eventminlen", 10))
+
+# integer copy number
+CALICOST_NONBALANCE_BAFDIST = float(CALICOST.get("nonbalance_bafdist", 1.0))
+CALICOST_NONDIPLOID_RDRDIST = float(CALICOST.get("nondiploid_rdrdist", 10.0))
+
+def calicost_root(sample, combo):    return f"{combo_root(sample, combo)}/CalicoST"
+def calicost_snp_dir(sample, combo): return f"{calicost_root(sample, combo)}/snp"
+def calicost_cna_dir(sample, combo): return f"{calicost_root(sample, combo)}/cna"
+def calicost_cfg1(sample, combo):    return f"{calicost_root(sample, combo)}/calicost_step1_config.yaml"
+def calicost_cfg2(sample, combo):    return f"{calicost_root(sample, combo)}/calicost_step2_cna.yaml"
+
+# Helper to dynamically find the CalicoST output subdirectory
+def get_calicost_internal_dir(wildcards):
+    # Read params from the global config dict
+    n_clones = int(CALICOST.get("n_clones", 3))
+    method   = CALICOST.get("initialization_method", "rectangle")
+    start    = int(CALICOST.get("num_hmrf_initialization_start", 0))
+    weight   = float(CALICOST.get("spatial_weight", 1.0))
+    
+    # Construct the folder name: e.g., "clone3_rectangle0_w1.0"
+    subdir = f"clone{n_clones}_{method}{start}_w{weight}"
+    
+    # Return the full path
+    # Note: calicost_cna_dir is defined in your existing script
+    return f"{calicost_cna_dir(SAMPLE, wildcards.combo)}/{subdir}"
+
+# ---- setting -----
+def benign_shared_file(sample=SAMPLE):
+    # 供“常规组合”共用的良性条形码列表（由 histology 选择器生成一次）
+    return f"{OUTROOT}/{sample}/_shared/benign_barcodes.txt"
+
+def disp(combo: str) -> str:
+    return DISP.get(combo, DEFAULT_DISP.get(combo, combo))
+
+def combo_root(sample, combo): return f"{OUTROOT}/{sample}/{disp(combo)}"
+def keep_path(combo):          return f"{combo_root(SAMPLE, combo)}/keep_barcodes.txt"
+def ref_path(combo):           return f"{combo_root(SAMPLE, combo)}/ref_barcodes.txt"
+def copyvae_work_dir(combo):   return f"{combo_root(SAMPLE, combo)}/copyVAE"
+def cost_dir(combo):           return f"{combo_root(SAMPLE, combo)}/compute_cost"
+def bench_path(combo, tool, step="main"):
+    return f"{cost_dir(combo)}/bench_{tool}__{step}.tsv"
+def cost_long_path(combo):     return f"{cost_dir(combo)}/cost_long.csv"
+def cost_summary_path(combo):  return f"{cost_dir(combo)}/tool_cost_summary.csv"
+
+def is_no_ref(name: str) -> bool:
+    n = name.lower()
+    return ("no_ref" in n) or ("no-ref" in n) or ("noref" in n)
+
+def shared_inputs(combo):
+    d = {"setup": ".snakemake/flags/r_shared_ready", "keep": keep_path(combo)}
+    if combo_needs_ref(combo):
+        d["ref"] = ref_path(combo)
+    return d
+
+# —— 哪些 combo 需要 ref（这里集中声明，后续只改这里即可）——
+COMBOS_WITH_REF = {"decon_stromaimm_ref","decon_auto_ref","histo_tumor_benign_ref"}  # 如需新增，往集合里加
+def combo_needs_ref(combo: str) -> bool:
+    return canon_combo(combo) in COMBOS_WITH_REF
+
+def _get_ref_param(wildcards, input, **_):
+    # input 里有 ref 就返回，否则给空串，shell 里再判断是否加参数
+    return input.get("ref", "")
+
+# 统一构建 ref 参数片段（兼容字符串或单元素列表），并对路径加引号
+def build_ref_opt(wildcards, input, **_):
+    ref = input.get("ref", "")
+    if isinstance(ref, (list, tuple)):
+        ref = ref[0] if ref else ""
+    return f"--ref_barcodes_file \"{ref}\"" if ref else ""
+
+# ==== AutoRef 配置 ====
+AUTOREF_CFG = config.get("autoref", {})
+# 参与投票的工具（名字小写）；仅会实际触发 ∩ SELECTED_TOOLS
+DAR_STAGE1_TOOLS = [t.strip().lower() for t in AUTOREF_CFG.get(
+    "stage1_tools", ["copykat","scevan","copyvae","tuscan"]
+)]
+
+def autoref_stage1_effective_tools():
+    return [t for t in DAR_STAGE1_TOOLS if t in SELECTED_TOOLS]
+
+def _dar_s1_done_list(sample):
+    outs = []
+    for t in autoref_stage1_effective_tools():
+        d = tool_dir(t)  # 你已有：COPYKAT / SCEVAN / copyVAE / TUSCAN
+        outs.append(f"{combo_root(sample,'decon_no_ref')}/{d}/_DONE.txt")
+    return outs
+
+def autoref_ref_path(sample):  return ref_path('decon_auto_ref')
+def autoref_keep_path(sample): return keep_path('decon_auto_ref')
+def autoref_audit_path(sample):return f"{combo_root(sample,'decon_auto_ref')}/ref/autoref_audit.tsv"
+
+# ---------- 最终目标 ----------
+# ---- sample type ----
+SAMPLE_TYPE = str(config.get("sample_type", "freshfrozen")).strip().lower()
+IS_FFPE = (SAMPLE_TYPE == "ffpe")
+
+# 默认工具集合（全小写）
+FFPE_TOOLS  = {"copykat", "scevan", "infercnv", "tuscan", "copyvae", "conicsmat","starch","infercnvpy"}
+FRESH_TOOLS = {"copykat", "scevan", "infercnv", "tuscan", "copyvae", "conicsmat", "starch","xclone","infercnvpy","calicost"}
+
+# 用户指定（大小写不敏感）
+USER_TOOLS = set(t.strip().lower() for t in config.get("tools", []))
+
+# 目录名规范化（根据你现有的规则输出路径保持一致）
+def tool_dir(tool: str) -> str:
+    t = tool.lower()
+    if t in {"copykat", "scevan", "tuscan", "starch"}: return t.upper()
+    if t == "infercnv":  return "infercnv"
+    if t == "copyvae":   return "copyVAE"
+    if t == "conicsmat": return "CONICSmat"
+    if t == "xclone":    return "XCLONE"
+    if t == "infercnvpy": return "infercnvpy"
+    if t == "calicost":    return "CalicoST"
+    return tool
+
+# 选用的工具集合
+if USER_TOOLS:
+    SELECTED_TOOLS = (USER_TOOLS & FFPE_TOOLS) if IS_FFPE else USER_TOOLS
+else:
+    SELECTED_TOOLS = FFPE_TOOLS if IS_FFPE else FRESH_TOOLS
+
+def _add_tool_target(outs, combo, tool_key):
+    outs.append(f"{combo_root(SAMPLE, combo)}/{tool_dir(tool_key)}/_DONE.txt")
+
+def expected_benchmark_files_for_combo(combo_name):
+    c_key = canon_combo(combo_name)
+    files = []
+
+    if c_key == "histo_pure_benign":
+        hpb_tools = [
+            str(t).strip().lower()
+            for t in config.get("histo_pure_benign", {}).get("tools", ["copykat", "SCEVAN", "infercnv"])
+        ]
+        if "copykat" in hpb_tools:
+            files += [
+                bench_path(combo_name, "copykat", "stage1"),
+                bench_path(combo_name, "copykat", "stage2"),
+            ]
+        if "scevan" in hpb_tools:
+            files += [
+                bench_path(combo_name, "scevan", "stage1"),
+                bench_path(combo_name, "scevan", "stage2"),
+            ]
+        if "infercnv" in hpb_tools and INFERCNV_GENE_POS:
+            files.append(bench_path(combo_name, "infercnv", "hpb_2step"))
+        return files
+
+    if c_key == "decon_auto_ref":
+        files.append(bench_path(combo_name, "autoref", "build"))
+
+    if "copykat" in SELECTED_TOOLS:
+        files.append(bench_path(combo_name, "copykat", "main"))
+    if "scevan" in SELECTED_TOOLS:
+        files.append(bench_path(combo_name, "scevan", "main"))
+    if "infercnv" in SELECTED_TOOLS and INFERCNV_GENE_POS:
+        files.append(bench_path(combo_name, "infercnv", "main"))
+    if "infercnvpy" in SELECTED_TOOLS:
+        files += [
+            bench_path(combo_name, "infercnvpy", "prepare"),
+            bench_path(combo_name, "infercnvpy", "main"),
+        ]
+    if "conicsmat" in SELECTED_TOOLS and (c_key in COMBOS_WITH_REF):
+        files.append(bench_path(combo_name, "conicsmat", "main"))
+    if "xclone" in SELECTED_TOOLS and (c_key in COMBOS_WITH_REF):
+        files += [
+            bench_path(combo_name, "xclone", "prepare"),
+            bench_path(combo_name, "xclone", "main"),
+        ]
+    if "numbat" in SELECTED_TOOLS and (c_key in COMBOS_WITH_REF):
+        files += [
+            bench_path(combo_name, "numbat", "pileup_phase"),
+            bench_path(combo_name, "numbat", "main"),
+        ]
+
+    if is_no_ref(c_key):
+        if "tuscan" in SELECTED_TOOLS:
+            files.append(bench_path(combo_name, "tuscan", "main"))
+        if "copyvae" in SELECTED_TOOLS:
+            files += [
+                bench_path(combo_name, "copyvae", "prepare"),
+                bench_path(combo_name, "copyvae", "main"),
+            ]
+        if "starch" in SELECTED_TOOLS:
+            files.append(bench_path(combo_name, "starch", "main"))
+        if "calicost" in SELECTED_TOOLS:
+            files += [
+                bench_path(combo_name, "calicost", "prepare_cfg"),
+                bench_path(combo_name, "calicost", "snp"),
+                bench_path(combo_name, "calicost", "cna"),
+            ]
+
+    return files
+
+def final_targets():
+    outs = []
+    outs.append(CONFIG_OK)
+    for c_raw in config["run_combos"]:
+        c = canon_combo(c_raw)
+
+        if c == "histo_pure_benign":
+            for t in config.get("histo_pure_benign", {}).get("tools", ["copykat", "SCEVAN", "infercnv"]):
+                outs.append(f"{combo_root(SAMPLE, 'histo_pure_benign')}/stage2_epi_withref/{t}/_DONE.txt")
+            outs.append(cost_summary_path(c))
+            continue
+        if c == "decon_auto_ref":
+            outs += [
+                autoref_keep_path(SAMPLE),
+                autoref_ref_path(SAMPLE),
+                f"{combo_root(SAMPLE,'decon_auto_ref')}/_READY.txt"
+            ]
+
+        if "copykat" in SELECTED_TOOLS:_add_tool_target(outs, c, "copykat")
+        if "scevan" in SELECTED_TOOLS:_add_tool_target(outs, c, "scevan")
+        if "infercnv" in SELECTED_TOOLS and INFERCNV_GENE_POS:_add_tool_target(outs, c, "infercnv")
+        if "infercnvpy" in SELECTED_TOOLS: _add_tool_target(outs, c, "infercnvpy")
+        if "xclone" in SELECTED_TOOLS and combo_needs_ref(c):_add_tool_target(outs, c, "xclone")
+        if "numbat" in SELECTED_TOOLS and combo_needs_ref(c):_add_tool_target(outs, c, "NUMBAT")
+        if "conicsmat" in SELECTED_TOOLS and combo_needs_ref(c):_add_tool_target(outs, c, "conicsmat")
+        if is_no_ref(c):
+            for tk in ("tuscan", "copyvae", "starch","calicost"):
+                if tk in SELECTED_TOOLS:
+                    _add_tool_target(outs, c, tk)
+        outs.append(cost_summary_path(c))
+        if config.get("cell2location", {}).get("run", False):
+                outs.append(f"{OUTROOT}/{SAMPLE}/cell2location/Decon_proportion.csv")
+    
+    return outs
+
+rule all:
+    input: final_targets()
+
+# ------------ validate config early ------------
+rule validate_config:
+    output: CONFIG_OK
+    run:
+        import os, re, csv, gzip
+        from pathlib import Path
+
+        errors = []
+        warnings = []
+
+        # run_combos legality
+        run_combos = [canon_combo(c) for c in config.get("run_combos", [])]
+        if not run_combos:
+            errors.append("run_combos is empty.")
+        else:
+            bad = set(run_combos) - COMBOS_ALLOWED
+            if bad:
+                errors.append(f"Unknown combo(s): {sorted(bad)}; allowed: {sorted(COMBOS_ALLOWED)}")
+
+        # tools subset check
+        user_tools = [t.strip().lower() for t in config.get("tools", [])]
+        bad_tools = set(user_tools) - TOOLS_ALLOWED
+        if bad_tools:
+            errors.append(f"Unknown tool(s) in config.tools: {sorted(bad_tools)}; allowed: {sorted(TOOLS_ALLOWED)}")
+
+        # Determine effective tools (mirror Snakefile logic)
+        sample_type = str(config.get("sample_type","ffpe")).strip().lower()
+        is_ffpe = (sample_type == "ffpe")
+        ffpe_tools  = {"copykat", "scevan", "infercnv", "tuscan", "copyvae", "conicsmat", "starch", "infercnvpy"}
+        fresh_tools = {"copykat", "scevan", "infercnv", "tuscan", "copyvae", "conicsmat", "starch", "xclone", "infercnvpy", "calicost"}
+        if user_tools:
+            selected = (set(user_tools) & ffpe_tools) if is_ffpe else set(user_tools)
+        else:
+            selected = ffpe_tools if is_ffpe else fresh_tools
+
+        # required reference files by tool
+        def req_file(path, label):
+            if not path or not os.path.exists(path):
+                errors.append(f"Missing required file for {label}: {path}")
+
+        if "infercnv" in selected:
+            infercnv = config.get("infercnv", {})
+            req_file(infercnv.get("gene_pos_file",""), "infercnv.gene_pos_file")
+
+        if "conicsmat" in selected:
+            conics = config.get("conicsmat", {})
+            req_file(conics.get("chrom_arm_file",""), "conicsmat.chrom_arm_file")
+
+        if "copyvae" in selected:
+            req_file(config.get("copyvae_gene_map_csv",""), "copyVAE gene_map_csv")
+            copyvae = config.get("copyvae", {})
+            req_file(copyvae.get("cell_cycle_file",""), "copyVAE.cell_cycle_file")
+        
+        # decon header checks if needed
+        def sniff_header(path):
+            opener = gzip.open if path.endswith(".gz") else open
+            with opener(path, "rt", newline="") as fh:
+                sample = fh.read(4096)
+                dialect = csv.Sniffer().sniff(sample, delimiters=",;\t")
+                fh.seek(0)
+                reader = csv.reader(fh, dialect)
+                header = next(reader)
+                return [h.strip() for h in header]
+
+        def parse_keys(x):
+            return [s.strip().lower() for s in str(x or '').split(',') if s.strip()]
+
+        needs_decon = any(c in {"decon_no_ref","decon_stromaimm_ref","decon_auto_ref"} for c in run_combos)
+        if needs_decon:
+            dc = config.get("decon", {})
+            epi_keys    = parse_keys(dc.get("epi_celltypes",""))
+            stroma_keys = parse_keys(dc.get("stroma_celltypes",""))
+            imm_keys    = parse_keys(dc.get("imm_celltypes",""))
+
+            if not epi_keys:
+                errors.append("decon.epi_celltypes is required for decon_* combos.")
+            if "decon_stromaimm_ref" in run_combos and not stroma_keys:
+                errors.append("decon.stroma_celltypes is required for decon_stromaimm_ref.")
+            if "decon_stromaimm_ref" in run_combos and not imm_keys:
+                errors.append("decon.imm_celltypes is required for decon_stromaimm_ref.")
+
+            # If cell2location is enabled, decon CSV is generated at runtime.
+            if config.get("cell2location", {}).get("run", False):
+                c2l = config.get("cell2location", {})
+                req_file(c2l.get("sc_ref_folder",""), "cell2location.sc_ref_folder")
+                if not str(c2l.get("cell_type_col","")).strip():
+                    errors.append("cell2location.cell_type_col is required when cell2location.run=True.")
+                if not str(c2l.get("batch_key","")).strip():
+                    warnings.append("cell2location.batch_key is empty; this is unusual for reference training.")
+                pybin = str(c2l.get("python_bin", C2L_PYBIN_DEFAULT)).strip()
+                if pybin and not os.path.exists(pybin):
+                    errors.append(f"cell2location.python_bin not found: {pybin}")
+            else:
+                decon_csv = config.get("decon_csv","")
+                if not decon_csv or not os.path.exists(decon_csv):
+                    errors.append(f"decon combo requested but decon_csv not found: {decon_csv}")
+                else:
+                    header = []
+                    try:
+                        header = sniff_header(decon_csv)
+                    except Exception as e:
+                        errors.append(f"Failed to read decon_csv header: {decon_csv} ({e})")
+                    else:
+                        header_l = [h.lower() for h in header]
+                        def any_match(keys):
+                            return any(any(k in col for col in header_l) for k in keys) if keys else False
+                        if epi_keys and not any_match(epi_keys):
+                            warnings.append("No matching columns for decon.epi_celltypes in decon_csv header.")
+                        if stroma_keys and not any_match(stroma_keys):
+                            warnings.append("No matching columns for decon.stroma_celltypes in decon_csv header.")
+                        if imm_keys and not any_match(imm_keys):
+                            warnings.append("No matching columns for decon.imm_celltypes in decon_csv header.")
+
+        needs_histo = any(c in {"histo_pure_benign", "histo_tumor_benign_ref"} for c in run_combos)
+        if needs_histo:
+            histcsv = config.get("histology_csv","")
+            if not histcsv:
+                warnings.append("histology-based combo requested but histology_csv is empty; will rely on Seurat export step.")
+            elif not os.path.exists(histcsv):
+                errors.append(f"histology-based combo requested but histology_csv not found: {histcsv}")
+
+        if errors:
+            msg = "\n- ".join(errors)
+            raise ValueError("Config validation failed:\n- " + msg)
+        from pathlib import Path
+        Path(str(output[0])).parent.mkdir(parents=True, exist_ok=True)
+        Path(str(output[0])).write_text("OK\n" + "\n".join(warnings))
+
+rule summarize_compute_cost:
+    input:
+        bench = lambda wc: expected_benchmark_files_for_combo(wc.combo)
+    output:
+        long = f"{OUTROOT}/{SAMPLE}/{{combo}}/compute_cost/cost_long.csv",
+        summary = f"{OUTROOT}/{SAMPLE}/{{combo}}/compute_cost/tool_cost_summary.csv"
+    params:
+        sample = SAMPLE,
+        run_key = lambda wc: canon_combo(wc.combo)
+    conda: "envs/python_sparse.yml"
+    threads: 1
+    shell: r"""
+        python python/summarize_compute_cost.py \
+          --sample "{params.sample}" \
+          --run_name "{wildcards.combo}" \
+          --run_key "{params.run_key}" \
+          --out_long "{output.long}" \
+          --out_summary "{output.summary}" \
+          {input.bench}
+    """
+# ------------ setup envs and packages ------------
+rule r_shared_setup:
+    output: ready = touch(".snakemake/flags/r_shared_ready")
+    conda: "envs/r-shared.yml"
+    threads: GLOBAL_THREADS
+    shell: r"""
+        set -euo pipefail
+        mkdir -p "$(dirname "{output.ready}")"
+        Rscript --vanilla R/install_packages_r_shared.R
+    """
+
+rule r_tuscan_setup:
+    output: ready = touch(".snakemake/flags/r_tuscan_ready")
+    conda: "envs/r-tuscan.yml"
+    threads: GLOBAL_THREADS
+    shell: r"""
+        set -euo pipefail
+        mkdir -p "$(dirname "{output.ready}")"
+        export R_LIBS_USER=""
+        export R_LIBS_SITE=""
+        unset R_LIBS R_PROFILE R_PROFILE_USER R_ENVIRON R_ENVIRON_USER
+        export RETICULATE_MINICONDA_ENABLED=FALSE
+        export RETICULATE_PYTHON="$(which python)"
+
+        Rscript --vanilla R/install_packages_tuscan.R
+    """
+    
+# ------------ cell2location ------------
+def run_c2l(wildcards):
+    return config.get("cell2location", {}).get("run", False)
+C2L_PROPORTION_FILE = f"{OUTROOT}/{SAMPLE}/cell2location/Decon_proportion.csv"
+C2L_PYBIN_DEFAULT = "<CONDA_ROOT>/envs/cell2loc_env/bin/python"
+def get_decon_input(wildcards):
+    """
+    Determines the source of the deconvolution CSV.
+    - Mode 2: If C2L is enabled, return the C2L output path (triggers C2L rule).
+    - Mode 1: If C2L is disabled, return the static file path from config.
+    """
+    if config.get("cell2location", {}).get("run", False):
+        return C2L_PROPORTION_FILE
+    else:
+        # Fallback to manual CSV
+        csv_path = config.get("decon_csv", "")
+        if not csv_path:
+            # Safety check to prevent confusing errors later
+            raise ValueError("Config Error: 'cell2location.run' is False, but 'decon_csv' is empty.")
+        return csv_path
+rule run_cell2location:
+    input:
+        visium_dir = VISIUM, # This variable resolves to /path/to/spaceranger/outs
+    output:
+        # The script now produces Decon.csv inside the outdir
+        decon = f"{OUTROOT}/{SAMPLE}/cell2location/Decon.csv",
+        sp_obj = f"{OUTROOT}/{SAMPLE}/cell2location/sp.h5ad"
+    params:
+        outdir  = f"{OUTROOT}/{SAMPLE}/cell2location",
+        ref_dir = config.get("cell2location", {}).get("sc_ref_folder", ""),
+        ct_col  = config.get("cell2location", {}).get("cell_type_col", "celltype_major_v2"),
+        batch   = config.get("cell2location", {}).get("batch_key", "sample"),
+        sample_id = SAMPLE,
+        pybin = config.get("cell2location", {}).get("python_bin", C2L_PYBIN_DEFAULT),
+        # Default Params from your script
+        n_cells = config.get("cell2location", {}).get("N_cells_per_location", 10),
+        alpha   = config.get("cell2location", {}).get("detection_alpha", 20),
+        # Training Params
+        ep_ref  = 250,
+        ep_sp   = 30000, # Per your script
+        gpu     = "--use_gpu" if config.get("cell2location", {}).get("gpu", False) else ""
+    threads: 4
+    resources:
+        gpu = 1 if config.get("cell2location", {}).get("gpu", False) else 0
+    shell:
+        """
+        if [ ! -x "{params.pybin}" ]; then
+          echo "[cell2location] python_bin not found or not executable: {params.pybin}" >&2
+          exit 1
+        fi
+        "{params.pybin}" python/run_cell2location.py \
+          --ref_folder "{params.ref_dir}" \
+          --visium_path "{input.visium_dir}" \
+          --sample_id "{params.sample_id}" \
+          --outdir "{params.outdir}" \
+          --cell_type_key "{params.ct_col}" \
+          --batch_key "{params.batch}" \
+          --epochs_ref {params.ep_ref} \
+          --epochs_spatial {params.ep_sp} \
+          --N_cells {params.n_cells} \
+          --alpha {params.alpha} \
+          {params.gpu}
+        """
+
+rule calc_c2l_proportions:
+    input:
+        # Changed input name to match new script output
+        raw = f"{OUTROOT}/{SAMPLE}/cell2location/Decon.csv"
+    output:
+        prop = C2L_PROPORTION_FILE
+    params:
+        epi_celltypes = config.get("decon", {}).get("epi_celltypes", ""),
+        stroma_celltypes = config.get("decon", {}).get("stroma_celltypes", ""),
+        imm_celltypes = config.get("decon", {}).get("imm_celltypes", "")
+    script:
+        "python/calc_proportions.py"
+
+# ------------------ SELECTORS ------------------
+rule select_histo_epi:
+    output: keep=keep_path('histo_no_ref')
+    input:  HISTCSV
+    conda: "envs/r-shared.yml"
+    params: epi_labels=EPI_LABELS
+    shell: r"""
+        Rscript R/select_histology_epi.R \
+          --histology_csv "{input}" \
+          --epi_labels "{params.epi_labels}" \
+          --out_keep "{output.keep}"
+    """
+rule select_histo_benign:
+    output: benign=f"{combo_root(SAMPLE,'histo_pure_benign')}/benign_barcodes.txt"
+    input:  HISTCSV
+    conda: "envs/r-shared.yml"
+    params: benign_labels=BENIGN_LAB
+    shell: r"""
+        Rscript R/select_histology_benign.R \
+          --histology_csv "{input}" \
+          --benign_labels "{params.benign_labels}" \
+          --out_benign "{output.benign}"
+    """
+
+rule select_histo_tumor_benign_ref:
+    output:
+        keep = keep_path('histo_tumor_benign_ref'),
+        ref  = ref_path('histo_tumor_benign_ref')
+    input:  HISTCSV
+    conda: "envs/r-shared.yml"
+    params:
+        tumor_labels = HISTO_TUMOR_LABELS,
+        benign_labels = HISTO_BENIGN_LABELS
+    shell: r"""
+        Rscript R/select_histology_labels.R \
+          --histology_csv "{input}" \
+          --labels "{params.tumor_labels}" \
+          --out_keep "{output.keep}"
+        Rscript R/select_histology_labels.R \
+          --histology_csv "{input}" \
+          --labels "{params.benign_labels}" \
+          --out_keep "{output.ref}"
+    """
+rule select_decon_epi:
+    output: keep=keep_path('decon_no_ref')
+    input:  get_decon_input 
+    conda: "envs/r-shared.yml"
+    params:
+        epi_celltypes=config.get("decon", {}).get("epi_celltypes", ""),
+        epi_threshold=str(EPI_THRES)
+    shell: r"""
+        Rscript R/select_decon_epi.R \
+          --decon_csv "{input}" \
+          --epi_celltypes "{params.epi_celltypes}" \
+          --epi_threshold {params.epi_threshold} \
+          --out_keep "{output.keep}"
+    """
+rule select_decon_stromaimm:
+    output:
+        keep=keep_path('decon_stromaimm_ref'),
+        ref =ref_path('decon_stromaimm_ref')
+    # MODIFIED: Use the function instead of DECONCSV constant
+    input:  get_decon_input
+    conda: "envs/r-shared.yml"
+    params:
+        epi_celltypes   = config.get("decon", {}).get("epi_celltypes", ""),
+        epi_threshold   = str(EPI_THRES),
+        stroma_celltypes= config.get("decon", {}).get("stroma_celltypes", ""),
+        imm_celltypes   = config.get("decon", {}).get("imm_celltypes", ""),
+        ref_top_frac    = str(REF_TOP_FR)
+    shell: r"""
+        Rscript R/select_decon_stromaimm_ref.R \
+          --decon_csv "{input}" \
+          --epi_celltypes "{params.epi_celltypes}" \
+          --epi_threshold {params.epi_threshold} \
+          --stroma_celltypes "{params.stroma_celltypes}" \
+          --imm_celltypes "{params.imm_celltypes}" \
+          --ref_top_frac {params.ref_top_frac} \
+          --out_keep "{output.keep}" \
+          --out_ref "{output.ref}"
+    """
+
+rule select_allspots_empty:
+    output: keep = keep_path('allspots_no_ref')
+    conda:  "envs/r-shared.yml"
+    threads: GLOBAL_THREADS
+    shell: r"""
+        set +e
+        Rscript --vanilla R/select_allspots_all.R \
+          --visium_folder "{VISIUM}" \
+          --out_keep "{output.keep}"
+        rc=$?; set -e
+        if [ -s "{output.keep}" ]; then
+          exit 0
+        else
+          exit $rc
+        fi
+    """
+
+# 共享良性条形码（供常规组合的 infercnv 使用）
+rule select_benign_shared:
+    input:  HISTCSV
+    output: benign = benign_shared_file()
+    conda:  "envs/r-shared.yml"
+    params: benign_labels = BENIGN_LAB
+    shell: r"""
+        Rscript R/select_histology_benign.R \
+          --histology_csv "{input}" \
+          --benign_labels "{params.benign_labels}" \
+          --out_benign "{output.benign}"
+    """
+
+# ------------------ 工具规则（单一通配版） ------------------
+# —— COPYKAT：按需依赖 ref（有就建依赖，没有就不依赖），参数里传给脚本
+rule copykat:
+    input:  
+        setup = ".snakemake/flags/r_shared_ready",
+        keep  = lambda wc: keep_path(wc.combo),
+        ref   = lambda wc: [ref_path(wc.combo)] if combo_needs_ref(wc.combo) else []   # ← RE-ADD
+        #ref   = lambda wc: [ref_path(wc.combo)] if combo_needs_ref(wc.combo) else []
+    output:
+        done = f"{OUTROOT}/{SAMPLE}/{{combo}}/COPYKAT/_DONE.txt"
+    params:
+        outdir   = f"{OUTROOT}/{SAMPLE}/{{combo}}/COPYKAT",
+        ref_file  = lambda wc: ref_path(wc.combo),
+    conda: "envs/r-shared.yml"
+    threads: GLOBAL_THREADS
+    benchmark: bench_path("{combo}", "copykat", "main")
+    shell: r"""
+        mkdir -p "{params.outdir}"
+        set +e
+        Rscript --vanilla R/run_copykat.R \
+          --visium_folder "{VISIUM}" \
+          --output_dir "{params.outdir}" \
+          --keep_barcodes_file "{input.keep}" \
+          --ref_barcodes_file "{params.ref_file}" \
+          --threads {threads}
+        rc=$?; set -e
+        if [ -s "{params.outdir}/copykat_results.rds" ] || [ -f "{params.outdir}/COPYKAT.OK" ]; then
+          touch {output.done}
+        else
+          exit $rc
+        fi
+    """
+
+# —— SCEVAN：同上
+rule scevan:
+    input:  
+        setup = ".snakemake/flags/r_shared_ready",
+        keep  = lambda wc: keep_path(wc.combo),    
+    output:
+        done = f"{OUTROOT}/{SAMPLE}/{{combo}}/SCEVAN/_DONE.txt"
+    params:
+        outdir   = f"{OUTROOT}/{SAMPLE}/{{combo}}/SCEVAN",
+        ref_file  = lambda wc: ref_path(wc.combo),
+    conda: "envs/r-shared.yml"
+    threads: GLOBAL_THREADS
+    benchmark: bench_path("{combo}", "scevan", "main")
+    shell: r"""
+        mkdir -p "{params.outdir}"
+        set +e
+        Rscript --vanilla R/run_scevan.R \
+          --visium_folder "{VISIUM}" \
+          --output_dir "{params.outdir}" \
+          --keep_barcodes_file "{input.keep}" \
+          --ref_barcodes_file "{params.ref_file}" \
+          --threads {threads}
+        rc=$?; set -e
+        if [ -s "{params.outdir}/SCEVAN_results.rds" ] || [ -f "{params.outdir}/SCEVAN.OK" ]; then
+          touch {output.done}
+        else
+          exit $rc
+        fi
+    """
+
+# —— TUSCAN：只会被 final_targets 挑中在 no-ref 组合跑；但规则本身是通配的
+rule tuscan:
+    input:
+        setup = ".snakemake/flags/r_tuscan_ready",
+        keep  = lambda wc: keep_path(wc.combo)
+    output:
+        done = f"{OUTROOT}/{SAMPLE}/{{combo}}/TUSCAN/_DONE.txt"
+    params:
+        outdir = f"{OUTROOT}/{SAMPLE}/{{combo}}/TUSCAN"
+    conda: "envs/r-tuscan.yml"
+    threads: GLOBAL_THREADS
+    benchmark: bench_path("{combo}", "tuscan", "main")
+    shell: r"""
+        export R_LIBS_USER=""
+        export R_LIBS_SITE=""
+        unset R_LIBS R_PROFILE R_PROFILE_USER R_ENVIRON R_ENVIRON_USER
+
+        mkdir -p "{params.outdir}"
+        set +e
+        Rscript --vanilla R/run_tuscan.R \
+          --visium_folder "{VISIUM}" \
+          --output_dir "{params.outdir}" \
+          --keep_barcodes_file "{input.keep}" \
+          --threads {threads}
+        rc=$?; set -e
+
+        if [[ -s "{params.outdir}/tumor_obj.rds.gz" && -s "{params.outdir}/cnv_obj.rds.gz" ]] || [[ -f "{params.outdir}/TUSCAN.OK" ]]; then
+          touch {output.done}
+        else
+          exit $rc
+        fi
+    """
+
+# —— copyVAE（准备 + 运行）：通配
+rule copyvae_prepare:
+    input:
+        keep = lambda wc: keep_path(wc.combo)
+    output:
+        h5ad     = f"{OUTROOT}/{SAMPLE}/{{combo}}/copyVAE/st_expression.h5ad",
+        barcodes = f"{OUTROOT}/{SAMPLE}/{{combo}}/copyVAE/barcodes_order.txt"
+    params:
+        outdir   = f"{OUTROOT}/{SAMPLE}/{{combo}}/copyVAE/"
+
+    conda: "envs/copyvae.yml"
+    threads: GLOBAL_THREADS
+    benchmark: bench_path("{combo}", "copyvae", "prepare")
+    shell: r"""
+        export HDF5_USE_FILE_LOCKING=FALSE
+        mkdir -p "{params.outdir}"
+        python python/copyvae_prepare.py \
+          --visium_folder "{VISIUM}" \
+          --keep_barcodes_file "{input.keep}" \
+          --output_dir "{params.outdir}"
+    """
+
+rule copyvae:
+    input:
+        h5ad     = f"{OUTROOT}/{SAMPLE}/{{combo}}/copyVAE/st_expression.h5ad",
+    output:
+        done = f"{OUTROOT}/{SAMPLE}/{{combo}}/copyVAE/_DONE.txt"
+    params:
+        outdir     = f"{OUTROOT}/{SAMPLE}/{{combo}}/copyVAE",
+        cell_cycle = COPYVAE_CELL_CYCLE,
+        gene_map   = COPYVAE_GENE_MAP
+    log:f"{OUTROOT}/{SAMPLE}/{{combo}}/copyVAE/copyvae.log"
+    conda: "envs/copyvae.yml"
+    threads: GLOBAL_THREADS
+    benchmark: bench_path("{combo}", "copyvae", "main")
+    shell: r"""
+        mkdir -p "{params.outdir}"
+        ORIG_DIR="$(pwd)"
+        cd "{params.outdir}"
+        set +e
+        export HDF5_USE_FILE_LOCKING=FALSE
+        export CUDA_VISIBLE_DEVICES="" 
+        python -u -m copyvae.pipeline \
+            "{input.h5ad}" "{params.cell_cycle}" --gene_map_csv "{params.gene_map}" \
+            > "{log}" 2>&1
+       rc=$?
+        cd "$ORIG_DIR"
+        set -e
+        if [ $rc -eq 0 ] && [ -f "{params.outdir}/pred_label.txt" ]; then
+          touch {output.done}
+        else
+          echo "[copyVAE] failed; see log: {log}" >&2
+          exit $rc
+        fi
+    """
+
+rule copyvae_plot:
+    input:
+        setup  = ".snakemake/flags/r_shared_ready",
+        keep   = lambda wc: keep_path(wc.combo),
+        pred   = f"{OUTROOT}/{SAMPLE}/{{combo}}/copyVAE/pred_label.txt",
+        order  = f"{OUTROOT}/{SAMPLE}/{{combo}}/copyVAE/barcodes_order.txt"
+    output:
+        plot   = f"{OUTROOT}/{SAMPLE}/{{combo}}/copyVAE/SpatialDimplot_copyvae.pdf"
+    params:
+        outdir = f"{OUTROOT}/{SAMPLE}/{{combo}}/copyVAE"
+    conda: "envs/r-shared.yml"
+    threads: GLOBAL_THREADS
+    shell: r"""
+        Rscript --vanilla R/plot_copyvae_spatial.R \
+          --visium_folder "{VISIUM}" \
+          --output_dir "{params.outdir}" \
+          --keep_barcodes_file "{input.keep}" \
+          --plot_file "$(basename "{output.plot}")"
+    """
+
+# —— INFERCNV（常规通配版）：有 ref 就 with-ref，没有就 no-ref
+rule infercnv:
+    input:
+        setup = ".snakemake/flags/r_shared_ready",
+        keep  = lambda wc: keep_path(wc.combo),
+        # 删掉下面这行的条件 ref 依赖
+        # ref   = lambda wc: [ref_path(wc.combo)] if combo_needs_ref(wc.combo) else []
+    output:
+        done  = f"{OUTROOT}/{SAMPLE}/{{combo}}/infercnv/_DONE.txt"
+    params:
+        outdir    = f"{OUTROOT}/{SAMPLE}/{{combo}}/infercnv",
+        gene_pos  = INFERCNV_GENE_POS,
+        # 新增：总是按路径拼出来（不做文件依赖）
+        ref_file  = lambda wc: ref_path(wc.combo),
+        hmm      = infercnv_hmm_flag
+    conda: "envs/r-shared.yml"
+    threads: GLOBAL_THREADS
+    benchmark: bench_path("{combo}", "infercnv", "main")
+    shell: r"""
+        mkdir -p "{params.outdir}"
+        set +e
+        Rscript --vanilla R/run_infercnv_regular.R \
+          --visium_folder "{VISIUM}" \
+          --output_dir "{params.outdir}" \
+          --keep_barcodes_file "{input.keep}" \
+          --gene_pos_file "{params.gene_pos}" \
+          --ref_barcodes_file "{params.ref_file}" \
+          --hmm {params.hmm} \
+          --threads {threads}
+        rc=$?; set -e
+
+        if [ -f "{params.outdir}/infercnv.OK" ] || ( [ $rc -eq 0 ] && [ -f "{params.outdir}/run.final.infercnv_obj" ] ); then
+          touch {output.done}
+        else
+          exit $rc
+        fi
+    """
+
+rule conicsmat:
+    input:
+        setup = ".snakemake/flags/r_shared_ready",
+        keep  = lambda wc: keep_path(wc.combo)
+    output:
+        done = f"{OUTROOT}/{SAMPLE}/{{combo}}/CONICSmat/_DONE.txt"
+    params:
+        outdir   = f"{OUTROOT}/{SAMPLE}/{{combo}}/CONICSmat",
+        arms     = CONICSMAT_ARMS,
+        ref_file = lambda wc: ref_path(wc.combo),
+        gene_pos = CONICSMAT_GENE_POS,
+        cm_win   = GLOBAL_WINDOW_SIZE,
+        cm_exp   = config.get("conicsmat", {}).get("exp_thresh", 0.1),
+        cm_thr   = config.get("conicsmat", {}).get("clip_thresh", 4.0)
+    conda: "envs/r-shared.yml"
+    threads: GLOBAL_THREADS
+    benchmark: bench_path("{combo}", "conicsmat", "main")
+    shell: r"""
+        if [ -z "{params.arms}" ]; then
+          echo "[CONICSmat] chrom_arm_file not configured"; exit 1
+        fi
+
+        set -euo pipefail
+        mkdir -p "{params.outdir}"
+
+        set +e
+        Rscript --vanilla R/run_conicsmat.R \
+          --visium_folder "{VISIUM}" \
+          --output_dir     "{params.outdir}" \
+          --keep_barcodes_file "{input.keep}" \
+          --ref_barcodes_file "{params.ref_file}" \
+          --chrom_arm_file "{params.arms}" \
+          --gene_pos_file "{params.gene_pos}" \
+          --exp_thresh "{params.cm_exp}" \
+          --windowsize "{params.cm_win}" \
+          --threshold "{params.cm_thr}" \
+          --threads {threads}
+        rc=$?; set -e
+
+        if [ -f "{params.outdir}/CONICSmat.OK" ]; then
+          touch {output.done}
+        else
+          exit $rc
+        fi
+    """
+# ---- STARCH：只在 no-ref 组合由 final_targets 触发；规则本身通配
+rule starch:
+    input:
+        keep = lambda wc: keep_path(wc.combo)
+    output:
+        done = f"{OUTROOT}/{SAMPLE}/{{combo}}/STARCH/_DONE.txt"
+    log:
+        f"{OUTROOT}/{SAMPLE}/{{combo}}/STARCH/starch.log"
+    params:
+        outdir     = f"{OUTROOT}/{SAMPLE}/{{combo}}/STARCH",
+        n_clusters = config.get("starch", {}).get("n_clusters", 3),
+        output_nm  = config.get("starch", {}).get("output_name", "STARCH"),
+        repo_dir   = config.get("starch", {}).get("repo_dir", ""),
+        repo_url   = config.get("starch", {}).get("repo_url", "https://github.com/raphael-group/STARCH.git"),
+        visium     = VISIUM
+    conda: "envs/starch.yml"
+    threads: GLOBAL_THREADS
+    benchmark: bench_path("{combo}", "starch", "main")
+    shell: r"""
+        mkdir -p "{params.outdir}"
+        set -euo pipefail
+        python python/run_starch.py \
+          --visium_folder      "{params.visium}" \
+          --output_dir         "{params.outdir}" \
+          --keep_barcodes_file "{input.keep}" \
+          --n_clusters         {params.n_clusters} \
+          --output_name        "{params.output_nm}" \
+          --starch_repo_dir    "{params.repo_dir}" \
+          --starch_repo_url    "{params.repo_url}" > "{log}" 2>&1
+        rc=$?
+        if [ $rc -ne 0 ]; then
+            echo "[STARCH] failed; see log: {log}" >&2
+            exit $rc
+        fi
+        test -f "{params.outdir}/STARCH.OK"
+        touch {output.done}
+    """
+# ---------- infercnvpy ----------
+rule infercnvpy_prepare:
+    input:
+        keep = lambda wc: keep_path(wc.combo),
+    output:
+        h5ad = f"{OUTROOT}/{SAMPLE}/{{combo}}/infercnvpy/infercnvpy_input.h5ad"
+    params:
+        visium = VISIUM,
+        ref_file = lambda wc: ref_path(wc.combo)
+    conda: "envs/infercnvpy.yml"
+    threads: GLOBAL_THREADS
+    benchmark: bench_path("{combo}", "infercnvpy", "prepare")
+    shell: r"""
+        set -euo pipefail
+        python - <<'PY'
+import os, sys
+import numpy as np
+import pandas as pd
+import scanpy as sc
+
+visium = "{params.visium}"
+mtx_dir = os.path.join(visium, "filtered_feature_bc_matrix")
+h5_file = os.path.join(visium, "filtered_feature_bc_matrix.h5")
+
+# 读 10x（用 gene_symbols 作为基因名，便于和 gene_order 对齐）
+if os.path.isdir(mtx_dir):
+    adata = sc.read_10x_mtx(mtx_dir, var_names="gene_symbols", make_unique=True)
+elif os.path.isfile(h5_file):
+    adata = sc.read_10x_h5(h5_file)  # scanpy 默认 gene_symbols
+    adata.var_names_make_unique()    # read_10x_h5 不自动去重，需手动
+else:
+    raise SystemExit(f"No 10x matrix under {{visium}}")
+    
+# 读 keep/ref，并做并集
+def read_lines(p):
+    if p and os.path.exists(p):
+        with open(p) as f:
+            return [ln.strip() for ln in f if ln.strip()]
+    return []
+
+keep = read_lines("{input.keep}")
+ref  = read_lines("{params.ref_file}")
+sel  = list(dict.fromkeys(keep + ref))  # 去重且保序
+
+if len(sel) == 0:
+    raise SystemExit("No cells after union(keep, ref).")
+
+# 子集（按 sel 顺序）
+obs_names = set(adata.obs_names)
+sel2 = [c for c in sel if c in obs_names]
+if len(sel2) == 0:
+    raise SystemExit("None of keep/ref found in 10x barcodes.")
+adata = adata[sel2, :].copy()
+
+# 保存
+os.makedirs(os.path.dirname("{output.h5ad}"), exist_ok=True)
+adata.write_h5ad("{output.h5ad}")
+print("[infercnvpy_prepare] wrote:", "{output.h5ad}", "cells:", adata.n_obs, "genes:", adata.n_vars)
+PY
+    """
+
+rule infercnvpy:
+    input:
+        h5ad = f"{OUTROOT}/{SAMPLE}/{{combo}}/infercnvpy/infercnvpy_input.h5ad",
+        keep = lambda wc: keep_path(wc.combo) 
+    output:
+        done = f"{OUTROOT}/{SAMPLE}/{{combo}}/infercnvpy/_DONE.txt"
+    params:
+        outdir   = f"{OUTROOT}/{SAMPLE}/{{combo}}/infercnvpy",
+        gene_pos = INFERCNV_GENE_POS,
+        ref_file = lambda wc: ref_path(wc.combo),
+        win      = GLOBAL_WINDOW_SIZE,
+    conda: "envs/infercnvpy.yml"
+    threads: GLOBAL_THREADS
+    benchmark: bench_path("{combo}", "infercnvpy", "main")
+    shell: r"""
+        set -euo pipefail
+        mkdir -p "{params.outdir}"
+
+        # 允许 ref 文件不存在/为空（脚本内会按 no-ref 处理）
+        REF_OPT=""
+        if [ -f "{params.ref_file}" ]; then REF_OPT="--ref_spots_file {params.ref_file}"; fi
+
+        python python/run_infercnvpy.py \
+          --input_h5ad "{input.h5ad}" \
+          --gene_order_file "{params.gene_pos}" \
+          --out_dir "{params.outdir}" \
+          --window_size {params.win} \
+          --n_jobs {threads} \
+          $REF_OPT
+
+        test -s "{params.outdir}/infercnvpy.h5ad"
+        touch {output.done}
+    """
+
+# ------------ NUMBAT: pileup + phase (allele counts) ------------
+rule numbat_install_pkg:
+    output:
+        ok = ".snakemake/flags/numbat_pkg_installed.ok"
+    conda: "envs/numbat.yml"
+    shell: r'''
+        R_LIBS_USER=".snakemake/Rlibs_numbat"
+        mkdir -p "$R_LIBS_USER"
+        Rscript --vanilla R/install_numbat.R
+        touch "{output.ok}"
+    '''
+
+rule numbat_pileup_phase:
+    input:
+        pkg_ok = ".snakemake/flags/numbat_pkg_installed.ok",
+        bam    = BAM_FILE,
+        keep   = lambda wc: keep_path(wc.combo)
+    output:
+        allele = f"{OUTROOT}/{SAMPLE}/{{combo}}/NUMBAT/{SAMPLE}_allele_counts.tsv.gz"
+    threads: GLOBAL_THREADS
+    conda: "envs/numbat.yml"
+    params:
+        outdir = f"{OUTROOT}/{SAMPLE}/{{combo}}/NUMBAT",
+        gmap   = REFS.get("gmap_file", ""),
+        eagle  = REFS.get("eagle_bin", ""),
+        snpvcf = REFS.get("snp_vcf", ""),
+        panel  = REFS.get("panel_dir", ""),
+        label  = SAMPLE,
+        samples= SAMPLE,
+        UMI    = NUMBAT.get("UMI_tag", "UB"),
+        CELL   = NUMBAT.get("cell_tag", "CB"),
+    benchmark: bench_path("{combo}", "numbat", "pileup_phase")
+    shell:
+        r"""
+        set -euo pipefail
+        mkdir -p "{params.outdir}"
+
+        export R_PROFILE_USER=/dev/null
+        export R_ENVIRON_USER=/dev/null
+
+        command -v cellsnp-lite >/dev/null 2>&1 || (echo "[ERROR] cellsnp-lite not in PATH" >&2; exit 127)
+        command -v samtools     >/dev/null 2>&1 || (echo "[ERROR] samtools not in PATH" >&2; exit 127)
+        command -v bcftools     >/dev/null 2>&1 || (echo "[ERROR] bcftools not in PATH" >&2; exit 127)
+
+        BIN=$(Rscript --vanilla -e 'cat(system.file("bin","pileup_and_phase.R", package="numbat"))')
+        [ -s "$BIN" ] || {{ echo "numbat::pileup_and_phase.R not found"; exit 1; }}
+
+        Rscript --vanilla "$BIN" \
+          --label "{params.label}" \
+          --samples "{params.samples}" \
+          --bams "{input.bam}" \
+          --barcodes "{input.keep}" \
+          --outdir "{params.outdir}" \
+          --gmap "{params.gmap}" \
+          --eagle "{params.eagle}" \
+          --snpvcf "{params.snpvcf}" \
+          --paneldir "{params.panel}" \
+          --ncores {threads} \
+          --UMItag "{params.UMI}" \
+          --cellTAG "{params.CELL}"
+
+        test -s "{output.allele}"
+        """
+
+rule numbat:
+    input:
+        setup  = ".snakemake/flags/numbat_pkg_installed.ok",
+        keep   = lambda wc: keep_path(wc.combo),
+        ref    = lambda wc: ref_path(wc.combo),  # Required for with-ref combos
+        allele = f"{OUTROOT}/{SAMPLE}/{{combo}}/NUMBAT/{SAMPLE}_allele_counts.tsv.gz"
+    output:
+        done   = f"{OUTROOT}/{SAMPLE}/{{combo}}/NUMBAT/_DONE.txt"
+    threads: GLOBAL_THREADS
+    conda: "envs/numbat.yml"
+    params:
+        outdir = f"{OUTROOT}/{SAMPLE}/{{combo}}/NUMBAT",
+        visium = config["input_path"],
+        genome = config.get("refs", {}).get("genome_build", "hg38"),
+        max_ent= NUMBAT.get("max_entropy", 0.8),
+        min_LLR= NUMBAT.get("min_LLR", 0),
+        tval   = NUMBAT.get("t", 1e-5),
+        min_cells = NUMBAT.get("min_cells", 5),
+        plot   = "true" if NUMBAT.get("plot", False) else "false"
+    benchmark: bench_path("{combo}", "numbat", "main")
+    shell:
+        r"""
+        set -euo pipefail
+        mkdir -p "{params.outdir}"
+
+        # ref 必须存在且非空
+        test -s "{input.ref}" || ( echo "[NUMBAT] empty ref file: {input.ref}" >&2; exit 2 )
+
+        # 隔离 R
+        export R_PROFILE_USER=/dev/null
+        export R_ENVIRON_USER=/dev/null
+
+        Rscript --vanilla R/run_numbat.R \
+          --visium_folder="{params.visium}" \
+          --barcodes_file="{input.keep}" \
+          --ref_barcodes_file="{input.ref}" \
+          --allele_tsv_gz="{input.allele}" \
+          --outdir="{params.outdir}" \
+          --genome="{params.genome}" \
+          --ncores="{threads}" \
+          --max_entropy="{params.max_ent}" \
+          --min_LLR="{params.min_LLR}" \
+          --t="{params.tval}" \
+          --min_cells="{params.min_cells}" \
+          --plot="{params.plot}"
+
+        touch "{output.done}"
+        """
+
+# ------------ CalicoST ------------
+rule calicost_install_pkg:
+    output:
+        ok = ".snakemake/flags/calicost_pkg_installed.ok"
+    conda: "envs/calicost.yml"
+    params:
+        repo = CALICOST_DIR
+    shell:
+        r'''
+        set -euo pipefail
+        test -d "{params.repo}" || (echo "[CalicoST] repo_dir not found: {params.repo}" >&2; exit 2)
+        pip install -e "{params.repo}"
+        python - <<'PY'
+import importlib
+m = importlib.import_module("calicost")
+print("[CalicoST] installed at:", m.__file__)
+PY
+        touch "{output.ok}"
+        '''
+
+rule calicost_prepare_cfg:
+    input:
+        keep     = lambda wc: keep_path(wc.combo),
+        template = CALICOST_TEMPLATE,
+        ref      = lambda wc: ref_path(wc.combo) if combo_needs_ref(wc.combo) else []
+    output:
+        cfg1 = f"{OUTROOT}/{SAMPLE}/{{combo}}/CalicoST/calicost_step1_config.yaml",
+        cfg2 = f"{OUTROOT}/{SAMPLE}/{{combo}}/CalicoST/calicost_step2_cna.yaml"
+    params:
+        cfgpath = CONFIG_FILE,
+        visium  = VISIUM,
+        outroot = f"{OUTROOT}/{SAMPLE}/{{combo}}/CalicoST",
+        # Pass path if 'with-ref', pass empty string if 'no-ref'
+        normalidx = lambda wc: ref_path(wc.combo) if combo_needs_ref(wc.combo) else "",
+        # --- NEW: Get Reference Paths from Common Config ---
+        snpvcf    = REFS.get("snp_vcf", ""),
+        panel     = REFS.get("panel_dir", ""),
+        eagle_dir = REFS.get("eagle_dir", "")
+    threads: GLOBAL_THREADS
+    conda: "envs/calicost_env.yml"
+    benchmark: bench_path("{combo}", "calicost", "prepare_cfg")
+    shell: r"""
+        set -euo pipefail
+        
+        python python/calicost_prepare_cfg.py \
+          --pipeline-config "{params.cfgpath}" \
+          --template-file "{input.template}" \
+          --visium-dir "{params.visium}" \
+          --default-snp-dir "{params.outroot}/snp" \
+          --default-output-dir "{params.outroot}/cna" \
+          --out-step1 "{output.cfg1}" \
+          --out-step2 "{output.cfg2}" \
+          --normalidx "{params.normalidx}" \
+          --snp-vcf "{params.snpvcf}" \
+          --phasing-panel "{params.panel}" \
+          --eagle-dir "{params.eagle_dir}" \
+          --create-outdirs
+        
+        mkdir -p "{params.outroot}/snp" "{params.outroot}/cna"
+    """
+
+rule calicost_snp:
+    input:
+        # function allowed here
+        pkg    = ".snakemake/flags/calicost_pkg_installed.ok",
+        cfg = lambda wc: f"{OUTROOT}/{SAMPLE}/{wc.combo}/CalicoST/calicost_step1_config.yaml"
+    output:
+        # NO lambdas; use touch() on a plain string
+        ok = touch(f"{OUTROOT}/{SAMPLE}/{{combo}}/CalicoST/snp/SNP.OK")
+    params:
+        repo = CALICOST_DIR
+    conda: "envs/calicost_env.yml"
+    threads: GLOBAL_THREADS
+    benchmark: bench_path("{combo}", "calicost", "snp")
+    shell: r"""
+        set -euo pipefail
+        test -s "{input.cfg}"   # important: use the NAMED input, not {input}
+        OMP_NUM_THREADS=1 \
+        snakemake --cores {threads} --configfile "{input.cfg}" --snakefile "{params.repo}/calicost.smk" all
+        touch "{output.ok}"
+    """
+
+rule calicost_cna:
+    input:
+        snp_ok = f"{OUTROOT}/{SAMPLE}/{{combo}}/CalicoST/snp/SNP.OK",
+        pkg    = ".snakemake/flags/calicost_pkg_installed.ok",
+        cfg    = lambda wc: f"{OUTROOT}/{SAMPLE}/{wc.combo}/CalicoST/calicost_step2_cna.yaml"
+    output:
+        ok   = touch(f"{OUTROOT}/{SAMPLE}/{{combo}}/CalicoST/cna/CNA.OK"),
+        done = touch(f"{OUTROOT}/{SAMPLE}/{{combo}}/CalicoST/_DONE.txt"),
+        gene  = f"{OUTROOT}/{SAMPLE}/{{combo}}/CalicoST/cnv_genelevel.tsv",
+        seg   = f"{OUTROOT}/{SAMPLE}/{{combo}}/CalicoST/cnv_seglevel.tsv",
+        clone = f"{OUTROOT}/{SAMPLE}/{{combo}}/CalicoST/clone_labels.tsv"
+    params:
+        repo = CALICOST_DIR,
+        src_dir = get_calicost_internal_dir
+    conda: "envs/calicost_env.yml"
+    threads: GLOBAL_THREADS
+    benchmark: bench_path("{combo}", "calicost", "cna")
+    shell: r"""
+        set -euo pipefail
+        test -s "{input.cfg}"
+        OMP_NUM_THREADS=1 \
+        python "{params.repo}/src/calicost/calicost_main.py" -c "{input.cfg}"
+
+        # 2. Copy the results from the internal subfolder to the main folder
+        cp -v "{params.src_dir}/cnv_genelevel.tsv" "{output.gene}"
+        cp -v "{params.src_dir}/cnv_seglevel.tsv"  "{output.seg}"
+        cp -v "{params.src_dir}/clone_labels.tsv"  "{output.clone}"
+
+        touch "{output.ok}" "{output.done}"
+    """
+# ------------ Xclone ------------
+rule xclone_merge_barcodes:
+    input:
+        keep = lambda wc: keep_path(wc.combo),
+        ref  = lambda wc: ref_path(wc.combo)
+    output:
+        union = f"{OUTROOT}/{SAMPLE}/{{combo}}/XCLONE/barcodes_union.tsv"
+    threads: 1
+    shell: r"""
+        # Concatenate both files, sort, and remove duplicates
+        cat "{input.keep}" "{input.ref}" | sort | uniq > "{output.union}"
+    """
+
+rule xcltk_prepare:
+    input:
+        bam     = BAM_FILE, 
+        barcode = f"{OUTROOT}/{SAMPLE}/{{combo}}/XCLONE/barcodes_union.tsv"
+    output:
+        # BAF outputs
+        baf_ad  = f"{OUTROOT}/{SAMPLE}/{{combo}}/XCLONE/BAF/3_baf_fc/xcltk.AD.mtx",
+        baf_dp  = f"{OUTROOT}/{SAMPLE}/{{combo}}/XCLONE/BAF/3_baf_fc/xcltk.DP.mtx",
+        # RDR outputs
+        rdr_mtx = f"{OUTROOT}/{SAMPLE}/{{combo}}/XCLONE/RDR/matrix.mtx",
+        rdr_bar = f"{OUTROOT}/{SAMPLE}/{{combo}}/XCLONE/RDR/barcodes.tsv"
+    params:
+        baf_out = f"{OUTROOT}/{SAMPLE}/{{combo}}/XCLONE/BAF",
+        rdr_out = f"{OUTROOT}/{SAMPLE}/{{combo}}/XCLONE/RDR",
+        # Config params
+        snpvcf    = REFS.get("snp_vcf", ""),
+        region    = XCLONE.get("gene_region", ""),
+        gmap      = REFS.get("gmap_file", ""),
+        eagle     = REFS.get("eagle_bin", ""),
+        panel     = REFS.get("panel_dir", "")
+    conda: "envs/xclone.yml" # Ensure you have this env or use your existing xcltk env name
+    threads: GLOBAL_THREADS
+    benchmark: bench_path("{combo}", "xclone", "prepare")
+    shell: r"""
+        set -euo pipefail
+        # Force the activated conda runtime libs ahead of system libstdc++ on cluster nodes.
+        export LD_LIBRARY_PATH="$CONDA_PREFIX/lib${{LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}}"
+
+        # 1. Run BAF
+        mkdir -p "{params.baf_out}"
+        xcltk baf \
+            --label "{SAMPLE}" \
+            --sam "{input.bam}" \
+            --barcode "{input.barcode}" \
+            --snpvcf "{params.snpvcf}" \
+            --region "{params.region}" \
+            --outdir "{params.baf_out}" \
+            --gmap "{params.gmap}" \
+            --eagle "{params.eagle}" \
+            --paneldir "{params.panel}" \
+            --ncores {threads}
+
+        # 2. Run RDR (basefc)
+        mkdir -p "{params.rdr_out}"
+        xcltk basefc \
+            --sam "{input.bam}" \
+            --barcode "{input.barcode}" \
+            --region "{params.region}" \
+            --outdir "{params.rdr_out}" \
+            --ncores {threads}
+    """
+
+# ===============================================
+# XClone Analysis (Python)
+# ===============================================
+rule xclone_run:
+    input:
+        # Preprocessing outputs
+        rdr_mtx = f"{OUTROOT}/{SAMPLE}/{{combo}}/XCLONE/RDR/matrix.mtx",
+        baf_ad  = f"{OUTROOT}/{SAMPLE}/{{combo}}/XCLONE/BAF/3_baf_fc/xcltk.AD.mtx",
+        # Barcode lists
+        keep    = lambda wc: keep_path(wc.combo),
+        ref     = lambda wc: ref_path(wc.combo)
+    output:
+        done = f"{OUTROOT}/{SAMPLE}/{{combo}}/XCLONE/_DONE.txt"
+    params:
+        outdir      = f"{OUTROOT}/{SAMPLE}/{{combo}}/XCLONE/out",
+        rdr_dir     = f"{OUTROOT}/{SAMPLE}/{{combo}}/XCLONE/RDR",
+        baf_dir     = f"{OUTROOT}/{SAMPLE}/{{combo}}/XCLONE/BAF/3_baf_fc",
+        dataset     = SAMPLE,
+        genome_mode = XCLONE.get("genome_mode", "hg38_genes")
+    conda: "envs/xclone.yml"
+    threads: GLOBAL_THREADS
+    benchmark: bench_path("{combo}", "xclone", "main")
+    shell: r"""
+        set -euo pipefail
+        export LD_LIBRARY_PATH="$CONDA_PREFIX/lib${{LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}}"
+        mkdir -p "{params.outdir}"
+        
+        python python/run_xclone.py \
+            --rdr_dir "{params.rdr_dir}" \
+            --baf_dir "{params.baf_dir}" \
+            --keep_barcodes "{input.keep}" \
+            --ref_barcodes "{input.ref}" \
+            --outdir "{params.outdir}" \
+            --dataset_name "{params.dataset}" \
+            --genome_mode "{params.genome_mode}"
+            
+        # Verify success
+        if [ -f "{params.outdir}/_DONE.txt" ]; then
+            cp "{params.outdir}/_DONE.txt" "{output.done}"
+        else
+            echo "XClone Python script finished but _DONE.txt is missing"
+            exit 1
+        fi
+    """
+
+# ===================== histo_pure_benign（两阶段） =====================
+def hpb_root(sample):               return combo_root(sample, "histo_pure_benign")
+def stage1_dir(sample):             return f"{hpb_root(sample)}/stage1_benign_noref"
+def stage2_dir(sample):             return f"{hpb_root(sample)}/stage2_epi_withref"
+def tool_stage1_dir(sample, tool):  return f"{stage1_dir(sample)}/{tool}"
+def tool_stage2_dir(sample, tool):  return f"{stage2_dir(sample)}/{tool}"
+def tool_ref_file(sample, tool):    return f"{hpb_root(sample)}/ref/{tool}_ref.txt"
+def tool_label_csv(sample, tool):   return f"{tool_stage1_dir(sample, tool)}/{tool}_label.csv"
+def benign_keep_file(sample):       return f"{stage1_dir(sample)}/keep_benign.txt"
+def epi_keep_file(sample):          return f"{stage2_dir(sample)}/keep_epi.txt"
+
+TOOLS_HPB   = config.get("histo_pure_benign", {}).get("tools", ["copykat", "SCEVAN","infercnv"])
+HPB_POSITIVE= config.get("histo_pure_benign", {}).get("positive_labels", "diploid,normal")
+
+rule select_histo_benign___hpb:
+    input:  HISTCSV
+    output: benign_keep=benign_keep_file(SAMPLE)
+    conda:  "envs/r-shared.yml"
+    params:
+        labels=",".join(config.get("histology", {}).get("benign_labels", ["Benign"]))
+    shell: r"""
+        Rscript R/select_histology_labels.R \
+          --histology_csv "{input}" \
+          --labels "{params.labels}" \
+          --out_keep "{output.benign_keep}"
+    """
+
+rule select_histo_epi___hpb:
+    input:  HISTCSV
+    output: epi_keep=epi_keep_file(SAMPLE)
+    conda:  "envs/r-shared.yml"
+    params:
+        labels=",".join(config.get("histology", {}).get("epi_labels", []))
+    shell: r"""
+        Rscript R/select_histology_labels.R \
+          --histology_csv "{input}" \
+          --labels "{params.labels}" \
+          --out_keep "{output.epi_keep}"
+    """
+
+# Stage-1（benign, no-ref）
+use rule copykat as copykat_stage1_noref___hpb with:
+    input:
+        setup = ".snakemake/flags/r_shared_ready",
+        keep  = benign_keep_file(SAMPLE)
+    output:
+        done      = touch(f"{tool_stage1_dir(SAMPLE,'copykat')}/_DONE.txt"),
+        label_csv = tool_label_csv(SAMPLE, "copykat")
+    params:
+        outdir    = tool_stage1_dir(SAMPLE, "copykat"),
+        ref       = ""
+    benchmark:
+        bench_path("histo_pure_benign", "copykat", "stage1")
+
+use rule scevan as scevan_stage1_noref___hpb with:
+    input:
+        setup = ".snakemake/flags/r_shared_ready",
+        keep  = benign_keep_file(SAMPLE)
+    output:
+        done      = touch(f"{tool_stage1_dir(SAMPLE,'SCEVAN')}/_DONE.txt"),
+        label_csv = tool_label_csv(SAMPLE, "SCEVAN")
+    params:
+        outdir    = tool_stage1_dir(SAMPLE, "SCEVAN"),
+        ref       = ""
+    benchmark:
+        bench_path("histo_pure_benign", "scevan", "stage1")
+
+# label.csv → ref.txt
+rule label2ref___hpb:
+    input:
+        s1done = lambda wc: f"{tool_stage1_dir(SAMPLE, wc.tool)}/_DONE.txt"
+    output:
+        ref = f"{hpb_root(SAMPLE)}/ref/{{tool}}_ref.txt"
+    conda:  "envs/r-shared.yml"
+    params:
+        positive   = HPB_POSITIVE,
+        label_path = lambda wc: tool_label_csv(SAMPLE, wc.tool)
+    shell: r"""
+        if [ ! -s "{params.label_path}" ]; then
+          echo "[HPB] label CSV not found: {params.label_path}" >&2
+          exit 1
+        fi
+        outdir="$(dirname "{output.ref}")"
+        mkdir -p "$outdir"
+        Rscript R/label_to_ref.R \
+          --label_csv "{params.label_path}" \
+          --out_ref   "{output.ref}" \
+          --positive  "{params.positive}"
+    """
+
+# Stage-2（epi with-ref）
+use rule copykat as copykat_stage2_withref___hpb with:
+    input:
+        setup = ".snakemake/flags/r_shared_ready",
+        keep  = epi_keep_file(SAMPLE),
+        ref   = tool_ref_file(SAMPLE, "copykat")
+    output:
+        done  = touch(f"{tool_stage2_dir(SAMPLE,'copykat')}/_DONE.txt")
+    params:
+        outdir= tool_stage2_dir(SAMPLE, "copykat"),
+        ref   = lambda wildcards, input, output, resources, threads: input.ref
+    benchmark:
+        bench_path("histo_pure_benign", "copykat", "stage2")
+
+use rule scevan as scevan_stage2_withref___hpb with:
+    input:
+        setup = ".snakemake/flags/r_shared_ready",
+        keep  = epi_keep_file(SAMPLE),
+        ref   = tool_ref_file(SAMPLE, "SCEVAN")
+    output:
+        done  = touch(f"{tool_stage2_dir(SAMPLE,'SCEVAN')}/_DONE.txt")
+    params:
+        outdir= tool_stage2_dir(SAMPLE, "SCEVAN"),
+        ref   = lambda wildcards, input, output, resources, threads: input.ref
+    benchmark:
+        bench_path("histo_pure_benign", "scevan", "stage2")
+
+rule histo_pure_benign_combo:
+    input:
+        benign = benign_keep_file(SAMPLE),
+        s1     = [f"{tool_stage1_dir(SAMPLE,t)}/_DONE.txt" for t in TOOLS_HPB],
+        refs   = [tool_ref_file(SAMPLE, t) for t in TOOLS_HPB],
+        epi    = epi_keep_file(SAMPLE),
+        s2     = [f"{tool_stage2_dir(SAMPLE,t)}/_DONE.txt" for t in TOOLS_HPB]
+    output:
+        touch(f"{combo_root(SAMPLE, 'histo_pure_benign')}/_DONE.txt")
+
+
+rule decon_auto_build_keep_and_ref_from_decon:
+    input:
+        decon_epi_keep = keep_path('decon_no_ref'),
+        s1_done        = _dar_s1_done_list(SAMPLE)
+    output:
+        keep  = autoref_keep_path(SAMPLE),   # decon_auto_ref/keep_barcodes.txt  ← aneuploid
+        ref   = autoref_ref_path(SAMPLE),    # decon_auto_ref/ref/ref_barcodes.txt ← diploid
+        audit = autoref_audit_path(SAMPLE)
+    params:
+        root_decon = combo_root(SAMPLE,'decon_no_ref'),
+        min_vote   = AUTOREF_CFG.get("min_vote", None),              # 默认 ceil(n_tools/2)
+        tie_policy = AUTOREF_CFG.get("tie_policy","aneuploid").strip().lower()  # 冲突偏向
+    conda: "envs/infercnvpy.yml"   # 需要 python + pandas
+    threads: 1
+    benchmark: bench_path("decon_auto_ref", "autoref", "build")
+    shell: r"""
+        set -euo pipefail
+        python - << 'PY'
+import os, math, pandas as pd
+
+root_decon   = r"{params.root_decon}"
+epi_keep_set = set([ln.strip() for ln in open(r"{input.decon_epi_keep}") if ln.strip()])
+
+# 期待的 label.csv 路径（存在才读取）
+candidates = [
+    ("copykat", os.path.join(root_decon, "COPYKAT", "copykat_label.csv")),
+    ("scevan",  os.path.join(root_decon, "SCEVAN",  "SCEVAN_label.csv")),
+    ("tuscan",  os.path.join(root_decon, "TUSCAN",  "TUSCAN_label.csv")),
+    ("copyvae", os.path.join(root_decon, "copyVAE", "copyVAE_label.csv")),
+]
+
+frames = []
+for name, path in candidates:
+    if not os.path.isfile(path) or os.path.getsize(path) == 0:
+        # copyVAE 兜底：pred_label.txt + barcodes_order.txt
+        if name == "copyvae":
+            pred = os.path.join(root_decon, "copyVAE", "pred_label.txt")
+            ords = os.path.join(root_decon, "copyVAE", "barcodes_order.txt")
+            if os.path.isfile(pred) and os.path.isfile(ords):
+                lab = [ln.strip().lower() for ln in open(pred) if ln.strip()]
+                bar = [ln.strip() for ln in open(ords) if ln.strip()]
+                if len(lab)==len(bar) and len(bar)>0:
+                    df = pd.DataFrame({"barcode":bar, "label_copyvae":lab})
+                    frames.append(df[df["barcode"].isin(epi_keep_set)])
+        continue
+
+    try:
+        df = pd.read_csv(path)
+    except Exception:
+        continue
+    if not {"barcode","label"} <= set(df.columns):
+        continue
+    df = df[["barcode","label"]].copy()
+    df["barcode"] = df["barcode"].astype(str)
+    df["label"]   = df["label"].astype(str).str.strip().str.lower()
+    # 仅在 decon-epi keep 里投票
+    df = df[df["barcode"].isin(epi_keep_set)]
+    # 只接受精确 "diploid"/"aneuploid"
+    df = df[df["label"].isin(["diploid","aneuploid"])]
+    if len(df)==0:
+        continue
+    df.rename(columns={"label": f"label_{name}"}, inplace=True)
+    frames.append(df)
+
+if not frames:
+    raise SystemExit("No usable xxx_label.csv under decon_no_ref (need barcode,label with diploid/aneuploid).")
+
+# 合并
+vote = None
+for df in frames:
+    vote = df if vote is None else vote.merge(df, how="outer", on="barcode")
+
+tool_cols = [c for c in vote.columns if c.startswith("label_")]
+def cnt(row, val): return sum((row[c]==val) for c in tool_cols)
+vote["votes_diploid"]   = vote.apply(lambda r: cnt(r,"diploid"),   axis=1)
+vote["votes_aneuploid"] = vote.apply(lambda r: cnt(r,"aneuploid"), axis=1)
+
+n_tools = len(tool_cols)
+min_vote_cfg = "{params.min_vote}"
+if min_vote_cfg in ("None","","none"):
+    min_vote = math.ceil(n_tools/2.0)
+else:
+    try: min_vote = int(min_vote_cfg)
+    except: min_vote = math.ceil(n_tools/2.0)
+
+tie_policy = "{params.tie_policy}"  # "aneuploid" or "diploid"
+
+def decide(row):
+    vd, va = row["votes_diploid"], row["votes_aneuploid"]
+    pass_d = vd >= min_vote
+    pass_a = va >= min_vote
+    if pass_d and not pass_a: return "diploid"
+    if pass_a and not pass_d: return "aneuploid"
+    if pass_d and pass_a:
+        if vd>va: return "diploid"
+        if va>vd: return "aneuploid"
+        return tie_policy
+    return "none"
+
+vote["final_label"] = vote.apply(decide, axis=1)
+
+ref_bc  = vote.loc[vote["final_label"]=="diploid",   "barcode"].tolist()
+keep_bc = vote.loc[vote["final_label"]=="aneuploid", "barcode"].tolist()
+
+os.makedirs(os.path.dirname(r"{output.ref}"), exist_ok=True)
+with open(r"{output.ref}", "w") as f:
+    for b in ref_bc: f.write(b+"\n")
+os.makedirs(os.path.dirname(r"{output.keep}"), exist_ok=True)
+with open(r"{output.keep}", "w") as f:
+    for b in keep_bc: f.write(b+"\n")
+
+vote.to_csv(r"{output.audit}", index=False)
+print(f"[autoref] tools={n_tools} min_vote={min_vote} -> ref(diploid)={len(ref_bc)} keep(aneuploid)={len(keep_bc)}")
+PY
+    """

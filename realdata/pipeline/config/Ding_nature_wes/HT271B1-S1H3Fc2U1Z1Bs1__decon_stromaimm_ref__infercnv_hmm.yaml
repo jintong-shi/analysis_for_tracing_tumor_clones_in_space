@@ -1,0 +1,33 @@
+## sample input ##
+sample_type: "freshfrozen"
+sample: "HT271B1-S1H3Fc2U1Z1Bs1"
+input_path: "<DATA_ROOT>/realdata/datasets/Ding_nature_wes_ff_nobam/source_links/visium_root/HT271B1-S1H3Fc2U1Z1Bs1/outs"
+decon_csv: "<DATA_ROOT>/realdata/datasets/Ding_nature_wes/source_links/cell2location_output/HT271B1-S1H3Fc2U1Z1Bs1/Decon_prop.csv"
+threads: 8
+
+tools: ["infercnv"]
+run_combos: ["decon_stromaimm_ref"]
+
+decon:
+  epi_celltypes: "Epithelial"
+  stroma_celltypes: "Fibroblasts,Endothelial,Pericytes"
+  imm_celltypes: "T_cells,B_cells,Plasma,DC,Macrophages"
+
+cell2location:
+  run: False
+  sc_ref_folder: "<DATA_ROOT>/realdata/datasets/Ding_nature_wes/source_links/sc_ref/HT271B1-S1H3"
+
+params:
+  epi_threshold: 0.5
+  ref_top_frac: 0.10
+
+display:
+  decon_stromaimm_ref: "Decon_StromaImm-ref"
+
+## output path ##
+outroot: "<DATA_ROOT>/realdata/datasets/Ding_nature_wes/run_links"
+
+## ref path ##
+infercnv:
+  gene_pos_file: "<REF_ROOT>/gencode_v38_gene_pos.txt"
+  HMM: true

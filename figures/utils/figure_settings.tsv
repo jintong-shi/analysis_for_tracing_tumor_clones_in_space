@@ -1,0 +1,140 @@
+setting_type	scope	id	label	color	order	alias	notes
+tool	global	copykat	CopyKAT	#2E86AB	1	CopyKAT	Real Task 3 color from Fig_setup.R.
+tool	global	scevan	SCEVAN	#A23B72	2	SCEVAN	Real Task 3 color chosen over synthetic Task 2 color.
+tool	global	copyvae	CopyVAE	#F18F01	3	CopyVAE	Real Task 3 color from Fig_setup.R.
+tool	global	tuscan	TUSCAN	#6A994E	4	TUSCAN	Real Task 3 color from Fig_setup.R.
+tool	global	numbat	Numbat	#C73E1D	5	Numbat	Real Task 3 color chosen over synthetic Task 2 color.
+tool	global	infercnv	InferCNV	#E89B43	6	InferCNV	Synthetic Task 2 color from figures.R.
+tool	global	starch	STARCH	#48A9A6	7	STARCH	Synthetic Task 2 color from figures.R.
+tool	global	calicost	CalicoST	#2E86AB	8	CalicoST	Synthetic Task 2 color from figures.R.
+tool	global	ground_truth	Ground truth	#D9D9D9	99	GT|Ground truth	Neutral ground-truth row color.
+tool_order	real_task3	copykat	CopyKAT	#2E86AB	1	CopyKAT	Current real Task 3 order.
+tool_order	real_task3	scevan	SCEVAN	#A23B72	2	SCEVAN	Current real Task 3 order.
+tool_order	real_task3	copyvae	CopyVAE	#F18F01	3	CopyVAE	Current real Task 3 order.
+tool_order	real_task3	tuscan	TUSCAN	#6A994E	4	TUSCAN	Current real Task 3 order.
+tool_order	real_task3	numbat	Numbat	#C73E1D	5	Numbat	Current real Task 3 order.
+tool_order	synth_task2_summary	calicost	CalicoST	#2E86AB	1	CalicoST	Current synthetic Task 2 summary order.
+tool_order	synth_task2_summary	starch	STARCH	#48A9A6	2	STARCH	Current synthetic Task 2 summary order.
+tool_order	synth_task2_summary	infercnv	InferCNV	#E89B43	3	InferCNV	Current synthetic Task 2 summary order.
+tool_order	synth_task2_summary	scevan	SCEVAN	#A23B72	4	SCEVAN	Current synthetic Task 2 summary order.
+tool_order	synth_task2_summary	numbat	Numbat	#C73E1D	5	Numbat	Current synthetic Task 2 summary order.
+tool_order	synth_task2_overview_ggplot	numbat	Numbat	#C73E1D	1	Numbat	Current ggplot y-axis factor order, bottom to top.
+tool_order	synth_task2_overview_ggplot	scevan	SCEVAN	#A23B72	2	SCEVAN	Current ggplot y-axis factor order, bottom to top.
+tool_order	synth_task2_overview_ggplot	infercnv	InferCNV	#E89B43	3	InferCNV	Current ggplot y-axis factor order, bottom to top.
+tool_order	synth_task2_overview_ggplot	starch	STARCH	#48A9A6	4	STARCH	Current ggplot y-axis factor order, bottom to top.
+tool_order	synth_task2_overview_ggplot	calicost	CalicoST	#2E86AB	5	CalicoST	Current ggplot y-axis factor order, bottom to top.
+tool_order	synth_task2_overview_ggplot	ground_truth	Ground truth	#D9D9D9	6	GT|Ground truth	Current ggplot y-axis factor order, bottom to top.
+tool_order	synth_task2_heatmap_py	infercnv	InferCNV	#E89B43	1	InferCNV	Current Python heatmap panel order, top to bottom after ground truth.
+tool_order	synth_task2_heatmap_py	scevan	SCEVAN	#A23B72	2	SCEVAN	Current Python heatmap panel order, top to bottom after ground truth.
+tool_order	synth_task2_heatmap_py	starch	STARCH	#48A9A6	3	STARCH	Current Python heatmap panel order, top to bottom after ground truth.
+tool_order	synth_task2_heatmap_py	numbat	Numbat	#C73E1D	4	Numbat	Current Python heatmap panel order, top to bottom after ground truth.
+tool_order	synth_task2_heatmap_py	calicost	CalicoST	#2E86AB	5	CalicoST	Current Python heatmap panel order, top to bottom after ground truth.
+run	real_task3	AllSpots_no-ref	AllSpots\nno-ref		1	AllSpots_no-ref	Current real Task 3 run order.
+run	real_task3	Decon_no-ref	Decon\nno-ref		2	Decon_no-ref	Current real Task 3 run order.
+run	real_task3	Decon_StromaImm-ref	Decon\nStromaImm-ref		3	Decon_StromaImm-ref	Current real Task 3 run order.
+metric	global	sensitivity	Sensitivity		1	sensitivity	Current metric label.
+metric	global	specificity	Specificity		2	specificity	Current metric label.
+metric	global	precision	Precision		3	precision	Current metric label.
+metric	global	f1_score	F1 score		4	f1_score	Current metric label.
+metric	global	balanced_accuracy	Balanced accuracy		5	balanced_accuracy	Current metric label.
+metric	global	accuracy	Accuracy		6	accuracy	Current metric label.
+metric	global	false_positive_rate	False positive\nrate		7	false_positive_rate	Current metric label.
+metric	global	false_negative_rate	False negative\nrate		8	false_negative_rate	Current metric label.
+sample_type	global	all_normal	all_normal	#2166AC	1	all_normal	Current real Task 3 sample annotation color.
+sample_type	global	normal_dominant	normal_dominant	#92C5DE	2	normal_dominant	Current real Task 3 sample annotation color.
+sample_type	global	balanced	balanced	#EAE5A4	3	balanced	Current real Task 3 sample annotation color.
+sample_type	global	tumor_dominant	tumor_dominant	#F4A582	4	tumor_dominant	Current real Task 3 sample annotation color.
+sample_type	global	all_tumor	all_tumor	#B2182B	5	all_tumor	Current real Task 3 sample annotation color.
+section_type	global	fresh_frozen	fresh_frozen	#1B9E77	1	fresh_frozen	Current real Task 3 section annotation color.
+section_type	global	ffpe	ffpe	#D95F02	2	ffpe	Current real Task 3 section annotation color.
+dataset	real_task3	nature_prostate_ff	dataset1 (fresh-frozen)	#7570B3	1	nature_prostate_ff	Current real Task 3 dataset label/color.
+dataset	real_task3	prostate_eva_ffpe	dataset2 (ffpe)	#E7298A	2	prostate_eva_ffpe	Current real Task 3 dataset label/color.
+dataset	real_task3	metastatic_prostate_ffpe	dataset3 (ffpe)	#66A61E	3	metastatic_prostate_ffpe	Current real Task 3 dataset label/color.
+palette	real_task3_balanced_accuracy	0.20	0.20	#2166AC	1	0.20	Current ComplexHeatmap balanced-accuracy scale.
+palette	real_task3_balanced_accuracy	0.35	0.35	#92C5DE	2	0.35	Current ComplexHeatmap balanced-accuracy scale.
+palette	real_task3_balanced_accuracy	0.50	0.50	#F7F7F7	3	0.50	Current ComplexHeatmap balanced-accuracy scale.
+palette	real_task3_balanced_accuracy	0.70	0.70	#F4A582	4	0.70	Current ComplexHeatmap balanced-accuracy scale.
+palette	real_task3_balanced_accuracy	0.90	0.90	#B2182B	5	0.90	Current ComplexHeatmap balanced-accuracy scale.
+palette	real_task3_tumor_proportion	0.00	0.00	#FDE725	1	0.00	Current tumor-proportion annotation scale.
+palette	real_task3_tumor_proportion	0.25	0.25	#7AD151	2	0.25	Current tumor-proportion annotation scale.
+palette	real_task3_tumor_proportion	0.50	0.50	#22A884	3	0.50	Current tumor-proportion annotation scale.
+palette	real_task3_tumor_proportion	0.75	0.75	#414487	4	0.75	Current tumor-proportion annotation scale.
+palette	real_task3_tumor_proportion	1.00	1.00	#440154	5	1.00	Current tumor-proportion annotation scale.
+palette	real_task3_spearman_rho	-1.00	-1.00	#2166AC	1	-1.00	Current Spearman rho heatmap scale.
+palette	real_task3_spearman_rho	-0.50	-0.50	#92C5DE	2	-0.50	Current Spearman rho heatmap scale.
+palette	real_task3_spearman_rho	0.00	0.00	#F7F7F7	3	0.00	Current Spearman rho heatmap scale.
+palette	real_task3_spearman_rho	0.50	0.50	#F4A582	4	0.50	Current Spearman rho heatmap scale.
+palette	real_task3_spearman_rho	1.00	1.00	#B2182B	5	1.00	Current Spearman rho heatmap scale.
+palette	synth_task2_pred_minus_gt	low	-3	#2C6FB5	1	low	Current synthetic Task 2 predicted-minus-truth low color.
+palette	synth_task2_pred_minus_gt	mid	0	#FFFFFF	2	mid	Current synthetic Task 2 predicted-minus-truth midpoint color.
+palette	synth_task2_pred_minus_gt	high	22	#C0392B	3	high	Current synthetic Task 2 predicted-minus-truth high color.
+tool	global	infercnv_expr	InferCNV (Expr)	#E89B43	9	InferCNV_Expr	Syn Task1 expression-channel InferCNV.
+tool	global	infercnv_cnv	InferCNV (CNV)	#B5701E	10	InferCNV_CNV	Syn Task1 CNV-state InferCNV.
+tool	global	numbat_expr	Numbat (Expr)	#C73E1D	11	Numbat_Expr	Syn Task1 expression-channel Numbat.
+tool	global	numbat_cnv	Numbat (CNV)	#8E2A14	12	Numbat_CNV	Syn Task1 CNV-state Numbat.
+tool	global	conicsmat	CONICSmat	#7570B3	13	CONICSmat	Syn Task1 CONICSmat.
+tool	global	infercnvpy	InferCNVpy	#C9A227	14	InferCNVPy|InferCNVpy	Syn Task1 InferCNVpy.
+tool	global	xclone	XClone	#E7298A	15	XClone	Syn Task1 XClone.
+tool_order	synth_task1	infercnv_expr	InferCNV (Expr)	#E89B43	1	InferCNV_Expr	Syn Task1 order/colors.
+tool_order	synth_task1	infercnv_cnv	InferCNV (CNV)	#B5701E	2	InferCNV_CNV	Syn Task1 order/colors.
+tool_order	synth_task1	infercnvpy	InferCNVpy	#C9A227	3	InferCNVPy	Syn Task1 order/colors.
+tool_order	synth_task1	copykat	CopyKAT	#2E86AB	4	CopyKAT	Syn Task1 order/colors.
+tool_order	synth_task1	scevan	SCEVAN	#A23B72	5	SCEVAN	Syn Task1 order/colors.
+tool_order	synth_task1	conicsmat	CONICSmat	#7570B3	6	CONICSmat	Syn Task1 order/colors.
+tool_order	synth_task1	copyvae	CopyVAE	#F18F01	7	CopyVAE	Syn Task1 order/colors.
+tool_order	synth_task1	starch	STARCH	#48A9A6	8	STARCH	Syn Task1 order/colors.
+tool_order	synth_task1	numbat_expr	Numbat (Expr)	#C73E1D	9	Numbat_Expr	Syn Task1 order/colors.
+tool_order	synth_task1	numbat_cnv	Numbat (CNV)	#8E2A14	10	Numbat_CNV	Syn Task1 order/colors.
+tool_order	synth_task1	xclone	XClone	#E7298A	11	XClone	Syn Task1 order/colors.
+tool_order	synth_task1	calicost	CalicoST	#117733	12	CalicoST	Syn Task1 order/colors; green avoids CopyKAT clash.
+metric	global	spearman	Spearman		9	spearman	Syn Task1 regression metric.
+metric	global	pearson	Pearson		10	pearson	Syn Task1 regression metric.
+metric	global	max_f1	Max F1		11	max_f1	Syn Task1 classification metric.
+metric	global	pauc_gain	pAUC (gain)		12	pauc_gain	Syn Task1 partial AUC (gains).
+metric	global	pauc_loss	pAUC (loss)		13	pauc_loss	Syn Task1 partial AUC (losses).
+direction	synth_task1	pauc_gain	Gain	#D6604D	1	pauc_gain|gain	Syn Task1 CNV gain (amplification) fill; canonical RdBu red.
+direction	synth_task1	pauc_loss	Loss	#4393C3	2	pauc_loss|loss	Syn Task1 CNV loss (deletion) fill; canonical RdBu blue.
+dataset	real_task1	Ding_nature_wes	Ding (WES)	#1B9E77	1	Ding_nature_wes	Real Task1 dataset label/color.
+dataset	real_task1	metastatic_prostate_ffpe	Metastatic prostate (FFPE)	#D95F02	2	metastatic_prostate_ffpe	Real Task1 dataset label/color.
+dataset	real_task1	skin_tumor_ff	Skin tumor (FF)	#7570B3	3	skin_tumor_ff	Real Task1 dataset label/color.
+tool_order	real_task1	infercnv	InferCNV	#E89B43	1	infercnv	Real Task1 order/colors.
+tool_order	real_task1	infercnvpy	InferCNVpy	#C9A227	2	infercnvpy	Real Task1 order/colors.
+tool_order	real_task1	copykat	CopyKAT	#2E86AB	3	copykat	Real Task1 order/colors.
+tool_order	real_task1	scevan	SCEVAN	#A23B72	4	scevan	Real Task1 order/colors.
+tool_order	real_task1	conicsmat	CONICSmat	#7570B3	5	conicsmat	Real Task1 order/colors.
+tool_order	real_task1	copyvae	CopyVAE	#F18F01	6	copyvae	Real Task1 order/colors.
+tool_order	real_task1	tuscan	TUSCAN	#6A994E	7	tuscan	Real Task1 order/colors.
+tool_order	real_task1	starch	STARCH	#48A9A6	8	starch	Real Task1 order/colors.
+tool_order	real_task1	numbat	Numbat	#C73E1D	9	numbat	Real Task1 order/colors.
+tool_order	real_task1	xclone	XClone	#E7298A	10	xclone	Real Task1 order/colors.
+tool_order	real_task1	calicost	CalicoST	#117733	11	calicost	Real Task1 order/colors; green avoids CopyKAT clash.
+dataset	global	Synthetic	Synthetic	#9467BD	1	Synthetic;synthetic_reps	Unified canonical dataset label.
+dataset	global	Ding_nature_wes	Pan-cancer (Mo et al.)	#1B9E77	2	Ding_nature_wes;Ding (WES)	Unified label; BRCA/PDAC/CRC.
+dataset	global	skin_tumor_ff	SCC (Ji et al.)	#D95F02	3	skin_tumor_ff;Skin tumor (FF)	Unified canonical dataset label.
+dataset	global	nature_prostate_ff	Prostate (Erickson et al.)	#7570B3	4	nature_prostate_ff	Unified canonical dataset label.
+dataset	global	metastatic_prostate_ffpe	Prostate (in house)	#66A61E	5	metastatic_prostate_ffpe;Metastatic prostate (FFPE)	Unified canonical dataset label.
+dataset	global	prostate_eva_ffpe	Prostate (Apostolov et al.)	#E7298A	6	prostate_eva_ffpe	Unified canonical dataset label.
+dataset	global	pt10_AP5_HD	Prostate (VisiumHD)	#E6AB02	7	pt10_AP5_HD;AP5;visiumHD	Unified label; high-res ST.
+dataset	global	brca_atera	Breast (Xenium)	#A6761D	8	brca_atera;atera;xenium	Unified label; high-res ST.
+cancer_type	global	BRCA	BRCA	#E7298A	1	BRCA;breast	Cancer-type palette.
+cancer_type	global	PRAD	PRAD	#1B9E77	2	PRAD;prostate	Cancer-type palette.
+cancer_type	global	LIHC	LIHC	#A6761D	6	LIHC;liver;hepatocellular	Cancer-type palette (synthetic modelled on LIHC).
+cancer_type	global	cSCC	cSCC	#D95F02	3	cSCC;skin	Cancer-type palette.
+cancer_type	global	PDAC	PDAC	#7570B3	4	PDAC;pancreas	Cancer-type palette.
+cancer_type	global	CRC	CRC	#E6AB02	5	CRC;colorectal	Cancer-type palette.
+cancer_type	global	Simulated	Simulated	#CFCFCF	6	Simulated;synthetic	Synthetic placeholder (no real cancer).
+prediction_class	real_task3	tumor	Tumor	#B2182B	1	Tumor	Task 3 spatial tumor/normal prediction colors.
+prediction_class	real_task3	normal	Normal	#2166AC	2	Normal	Task 3 spatial tumor/normal prediction colors.
+prediction_class	real_task3	other	Other	#D9D9D9	3	Other|NA	Task 3 spatial tumor/normal prediction colors (excluded spots).
+prediction_class	real_task3	non_epithelial	Non-epithelial	#D9D9D9	4	non_epithelial	Task 3 spatial non-epithelial spot color.
+prediction_class	real_task3	unassigned	Unassigned	#636363	5	unassigned	Task 3 spatial unassigned prediction color.
+spatial_truth	real_task3	pos	Cancer	#B2182B	1	cancer|tumor	Task 3 spatial ground-truth class.
+spatial_truth	real_task3	neg	Benign epithelial	#2166AC	2	benign|normal	Task 3 spatial ground-truth class.
+spatial_truth	real_task3	other	Other cell types	#D9D9D9	3	other|non_epithelial	Task 3 spatial ground-truth class (non-epithelial / not scored).
+spatial_pred	real_task3	pos	Aneuploid	#B2182B	1	aneuploid|tumor	Task 3 spatial prediction class.
+spatial_pred	real_task3	neg	Diploid	#2166AC	2	diploid|normal	Task 3 spatial prediction class.
+spatial_pred	real_task3	unassigned	Unassigned	#4DAF4A	3	unassigned	Task 3 spatial prediction: present but no call.
+spatial_pred	real_task3	na	NA	#636363	4	na	Task 3 spatial prediction: spot not scored by the tool.
+palette	real_task3_false_positive_rate	p0	0.00	#FFF5F0	1		FPR ramp (low=good, high=bad); ColorBrewer Reds.
+palette	real_task3_false_positive_rate	p50	0.50	#FB6A4A	2		FPR ramp midpoint.
+palette	real_task3_false_positive_rate	p100	1.00	#67000D	3		FPR ramp high.

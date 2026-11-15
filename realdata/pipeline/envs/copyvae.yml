@@ -1,0 +1,24 @@
+# envs/copyvae.yml
+name: stcnv-copyvae
+channels: [conda-forge, defaults]
+dependencies:
+  - python=3.10
+  - pip
+  - git
+  - setuptools
+  - wheel
+  - numpy
+  - pandas
+  - h5py
+  - anndata
+  - scipy
+  - matplotlib
+  - scikit-learn
+  - tensorflow>=2.10        # CPU 版；如要 GPU 换成匹配 CUDA 的 build
+  - scanpy                  # 用 conda 安装，避免 pip 编译链
+  - tqdm
+  - pyarrow  
+  - tf-keras 
+  - tensorflow-probability
+  - pip:
+      - -e <TOOLS_ROOT>/copyVAE

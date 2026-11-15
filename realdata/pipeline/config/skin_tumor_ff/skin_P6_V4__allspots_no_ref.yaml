@@ -1,0 +1,20 @@
+## sample input ##
+sample_type: "freshfrozen"
+sample: "skin_P6_V4"
+input_path: "<DATA_ROOT>/public_data/skin_tumor/visium_from_kim/Patient6/V19T26-101_V4/spaceranger_rerun/outs"
+threads: 8
+
+tools: ["calicost", "starch", "tuscan"]
+run_combos: ["allspots_no_ref"]
+
+display:
+  allspots_no_ref: "AllSpots_no-ref"
+
+## output path ##
+outroot: "<DATA_ROOT>/realdata/datasets/skin_tumor_ff/run_CNV"
+
+## ref path ##
+starch:
+  n_clusters: 3
+  output_name: STARCH
+  repo_dir: "<TOOLS_ROOT>"

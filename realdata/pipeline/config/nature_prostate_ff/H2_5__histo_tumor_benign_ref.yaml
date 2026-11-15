@@ -1,0 +1,36 @@
+## sample input ##
+sample_type: "freshfrozen"
+sample: "H2_5"
+input_path: "<DATA_ROOT>/realdata/datasets/nature_prostate_ff/truth_links/per_sample/H2_5/spaceranger_out/outs"
+histology_csv: "<DATA_ROOT>/realdata/datasets/nature_prostate_ff/truth_links/per_sample/H2_5/histology.csv"
+threads: 8
+
+tools: ["infercnv", "numbat", "scevan"]
+run_combos: ["histo_tumor_benign_ref"]
+
+histology:
+  tumor_labels: ["Tumor"]
+  benign_labels: ["Normal"]
+  epi_labels: ["Normal", "Tumor"]
+
+display:
+  histo_tumor_benign_ref: "HistoTumor_Benign-ref"
+
+## output path ##
+outroot: "<DATA_ROOT>/realdata/datasets/nature_prostate_ff/run_links"
+
+## ref path ##
+infercnv:
+  gene_pos_file: "<REF_ROOT>/gencode_v38_gene_pos.txt"
+  HMM: false
+numbat:
+  bam_path: "<COLLAB_DATA>/projects/oxford_prostate/spatial_VDJ/V13Y08-128_A/output_data/V13Y08-128_A1/outs/possorted_genome_bam.bam"
+  gmap_file: "<TOOLS_ROOT>/Eagle_v2.4.1/tables/genetic_map_hg38_withX.txt.gz"
+  eagle_bin: "<TOOLS_ROOT>/Eagle_v2.4.1/eagle"
+  snp_vcf: "<REF_ROOT>/numbat/genome1K.phase3.SNP_AF5e2.chr1toX.hg38.vcf"
+  panel_dir: "<REF_ROOT>/numbat/1000G_hg38"
+  UMI_tag: UB
+  cell_tag: CB
+  max_entropy: 0.8
+  min_LLR: 5
+  plot: true

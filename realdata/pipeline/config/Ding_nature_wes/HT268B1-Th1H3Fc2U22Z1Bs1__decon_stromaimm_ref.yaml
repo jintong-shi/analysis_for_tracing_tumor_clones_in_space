@@ -1,0 +1,44 @@
+## sample input ##
+sample_type: "freshfrozen"
+sample: "HT268B1-Th1H3Fc2U22Z1Bs1"
+input_path: "<DATA_ROOT>/realdata/datasets/Ding_nature_wes/source_links/spaceranger/HT268B1-Th1H3Fc2U22Z1Bs1/outs"
+decon_csv: "<DATA_ROOT>/realdata/datasets/Ding_nature_wes/source_links/cell2location_output/HT268B1-Th1H3Fc2U22Z1Bs1/Decon_prop.csv"
+threads: 8
+
+tools: ["conicsmat", "copykat", "copyvae", "infercnv", "infercnvpy", "scevan", "starch", "tuscan"]
+run_combos: ["decon_stromaimm_ref"]
+
+decon:
+  epi_celltypes: "Epithelial"
+  stroma_celltypes: "Fibroblasts,Endothelial,Pericytes"
+  imm_celltypes: "Macrophages,T_cells,B_cells,Plasma,DC"
+
+cell2location:
+  run: False
+  sc_ref_folder: "<DATA_ROOT>/realdata/datasets/Ding_nature_wes/source_links/sc_ref/HT268B1-Th1H3"
+
+params:
+  epi_threshold: 0.5
+  ref_top_frac: 0.10
+
+display:
+  decon_stromaimm_ref: "Decon_StromaImm-ref"
+
+## output path ##
+outroot: "<DATA_ROOT>/realdata/datasets/Ding_nature_wes/run_links"
+
+## ref path ##
+infercnv:
+  gene_pos_file: "<REF_ROOT>/gencode_v38_gene_pos.txt"
+  HMM: false
+conicsmat:
+  chrom_arm_file: "<TOOLS_ROOT>/CONICSmat/chromosome_arm_positions_grch38.txt"
+copyvae_gene_map_csv: "<REF_ROOT>/hg38_gene_map.csv"
+copyvae_cell_cycle_file: "<TOOLS_ROOT>/copyVAE/data/Macosko_cell_cycle_genes.txt"
+copyvae:
+  cell_cycle_file: "<TOOLS_ROOT>/copyVAE/data/Macosko_cell_cycle_genes.txt"
+  gene_map_csv: "<REF_ROOT>/hg38_gene_map.csv"
+starch:
+  n_clusters: 3
+  output_name: STARCH
+  repo_dir: "<TOOLS_ROOT>"
